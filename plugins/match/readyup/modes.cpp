@@ -458,10 +458,20 @@ static void MaybeForceRosterTeamsLocked(State& st) {
           break;
         }
       }
-      if (!same) return;
-      if (ForceJoinTeamForSlot(slot, join)) {
-        Print("ready: moved %s to %s (their team's side this map)\n", name.c_str(),
-              join == 3 ? "CT" : join == 2 ? "T" : "spectators");
+      if (!same || !ForceJoinTeamForSlot(slot, join)) return;
+      // ChangeTeam fires player_team synchronously, so the registry already shows a move that
+      // landed. One the engine refused (a full team) is retried every interval: report it once.
+      static std::unordered_set<uint64_t> s_refusalReported;
+      const char* side = join == 3 ? "CT" : join == 2 ? "T" : "spectators";
+      for (const auto& x : ListHumans()) {
+        if (x.slot != slot || x.steamid64 != steamid) continue;
+        if (x.team == join) {
+          s_refusalReported.erase(steamid);
+          Print("ready: moved %s to %s (their team's side this map)\n", name.c_str(), side);
+        } else if (s_refusalReported.insert(steamid).second) {
+          Print("ready: could not move %s to %s (still trying)\n", name.c_str(), side);
+        }
+        return;
       }
     });
   }
