@@ -462,6 +462,11 @@ static void MaybeForceRosterTeamsLocked(State& st) {
       if (ForceJoinTeamForSlot(slot, join)) {
         Print("ready: moved %s to %s (their team's side this map)\n", name.c_str(),
               join == 3 ? "CT" : join == 2 ? "T" : "spectators");
+        // Only a move that landed: a refused one is retried every interval and must not restart
+        // the warmup round each time.
+        for (const auto& x : ListHumans()) {
+          if (x.slot == slot && x.steamid64 == steamid && x.team == join) ModesOnHumanJoinedTeam(join);
+        }
       }
     });
   }
