@@ -245,10 +245,10 @@ bool RespawnAvailable() {
   return a->engine_feature_available && a->engine_feature_available(a->self, "respawn") == 1;
 }
 
-bool RespawnSlot(int slot) {
+int RespawnSlot(int slot) {
   const ru_api* a = host::Api();
-  if (!a || !host::OnGameThread() || slot < 0 || !RU_API_HAS(a, player_respawn) || !a->player_respawn) return false;
-  return a->player_respawn(a->self, slot) == 1;
+  if (!a || !host::OnGameThread() || slot < 0 || !RU_API_HAS(a, player_respawn) || !a->player_respawn) return 0;
+  return a->player_respawn(a->self, slot);
 }
 
 const char* FeatureName(Feature f) {

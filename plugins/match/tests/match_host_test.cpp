@@ -116,6 +116,7 @@ static bool g_refuseTeamChange = false;
 // engine_feature_available("respawn"); the slots player_respawn was called for.
 static bool g_respawnAvailable = true;
 static std::vector<int> g_respawned;
+static int g_respawnRc = 1;  // player_respawn: 1 respawned, 2 already alive, 0 refused
 static std::vector<FakePlayer> g_players = {
     {2, 2, 76561198000000001ull, 3, false, "alice"},
 };
@@ -184,7 +185,7 @@ void FillEngineApi(ru_api* a) {
   };
   a->player_respawn = [](ru_plugin*, int slot) {
     g_respawned.push_back(slot);
-    return 1;
+    return g_respawnRc;
   };
   a->ev_get_int = [](ru_plugin*, const ru_game_event*, const char*, int def) { return def; };
   a->ev_get_float = [](ru_plugin*, const ru_game_event*, const char*, double def) { return def; };
@@ -685,6 +686,24 @@ int main(int argc, char** argv) {
   g_refuseTeamChange = true;
   Check(!FramesUntil([&] { return respawned(3); }, 2000), "a joiner no longer on T / CT is not respawned");
   g_refuseTeamChange = false;
+
+  std::puts("-- team lock: an already alive player is left alone, a refused respawn restarts the round");
+  ClearLog();
+  ClearCmds();
+  g_respawned.clear();
+  g_respawnRc = 2;
+  g_players.back().team = 0;
+  Check(FramesUntil([&] { return respawned(3); }, 6000), "player_respawn is tried for the moved player");
+  Check(!FramesUntil([] { return Sent("mp_restartgame 1"); }, 2500), "an already alive player does not restart the round");
+  ClearLog();
+  ClearCmds();
+  g_respawned.clear();
+  g_respawnRc = 0;
+  g_players.back().team = 0;
+  Check(FramesUntil([&] { return respawned(3); }, 6000), "player_respawn is tried again");
+  Check(FramesUntil([] { return Sent("mp_restartgame 1"); }, 3000), "a refused respawn falls back to the warmup round restart");
+  g_respawnRc = 1;
+  (void)FramesUntil([] { return false; }, 4500);  // past the restart debounce
 
   std::puts("-- team lock without respawn: a forced move restarts the warmup round");
   ClearLog();

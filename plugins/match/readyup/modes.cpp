@@ -1195,35 +1195,14 @@ static void ResetPracticeRulesLocked(State& st) {
 
 }  // namespace
 
-void ModesOnHumanJoinedTeam(int slot, int team) {
-  if (team != 2 && team != 3) return;
+// Restarts the match warmup round so everyone spawns. Debounced: a few joins (and a team-lock
+// move) land in the same restart.
+static void RestartWarmupRoundForJoiner() {
   static bool s_pending = false;
   static auto s_last = std::chrono::steady_clock::time_point{};
-  {
-    auto& st = St();
-    std::lock_guard<std::mutex> lk(st.mu);
-    if (st.mode != ReadyUpMode::MatchWarmup) return;
-  }
-  if (slot >= 0 && RespawnAvailable()) {
-    // 0.5 s: the team change has landed; only the joiner respawns (if still dead and on a team).
-    ScheduleOnGameThread(0.5, [slot]() {
-      {
-        auto& st = St();
-        std::lock_guard<std::mutex> lk(st.mu);
-        if (st.mode != ReadyUpMode::MatchWarmup) return;
-      }
-      for (const auto& x : ListHumans()) {
-        if (x.slot != slot || (x.team != 2 && x.team != 3)) continue;
-        if (RespawnSlot(slot)) Debug("modes: respawned slot %d so the joiner spawns\n", slot);
-        return;
-      }
-    });
-    return;
-  }
   const auto now = std::chrono::steady_clock::now();
   if (s_pending || (now - s_last) < std::chrono::seconds(4)) return;
   s_pending = true;
-  // 1.5 s: lets a few joins (and a team-lock move) land in the same restart.
   ScheduleOnGameThread(1.5, []() {
     s_pending = false;
     s_last = std::chrono::steady_clock::now();
@@ -1234,6 +1213,34 @@ void ModesOnHumanJoinedTeam(int slot, int team) {
     }
     (void)EnqueueServerCommand("mp_restartgame 1");
     DebugLine("modes: warmup round restarted so a joining player spawns");
+  });
+}
+
+void ModesOnHumanJoinedTeam(int slot, int team) {
+  if (team != 2 && team != 3) return;
+  {
+    auto& st = St();
+    std::lock_guard<std::mutex> lk(st.mu);
+    if (st.mode != ReadyUpMode::MatchWarmup) return;
+  }
+  if (slot < 0 || !RespawnAvailable()) {
+    RestartWarmupRoundForJoiner();
+    return;
+  }
+  // 0.5 s: the team change has landed; only the joiner respawns (if still dead and on a team).
+  ScheduleOnGameThread(0.5, [slot]() {
+    {
+      auto& st = St();
+      std::lock_guard<std::mutex> lk(st.mu);
+      if (st.mode != ReadyUpMode::MatchWarmup) return;
+    }
+    for (const auto& x : ListHumans()) {
+      if (x.slot != slot || (x.team != 2 && x.team != 3)) continue;
+      const int rc = RespawnSlot(slot);
+      if (rc == 1) Debug("modes: respawned slot %d so the joiner spawns\n", slot);
+      else if (rc == 0) RestartWarmupRoundForJoiner();
+      return;
+    }
   });
 }
 

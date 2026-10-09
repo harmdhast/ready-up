@@ -77,9 +77,9 @@ bool ForceJoinTeamForSlot(int slot, int joinTeam);
 bool MoveSlotToSpectators(int slot);
 // Whether ru_api 1.14 player_respawn works on this core and CS2 build. Game thread.
 bool RespawnAvailable();
-// The dead player in `slot` (on T / CT) respawns alone through player_respawn. False when refused
-// (alive, not on a team) or unavailable. Game thread.
-bool RespawnSlot(int slot);
+// The dead player in `slot` (on T / CT) respawns alone through player_respawn: 1 respawned,
+// 2 already alive, 0 refused or unavailable. Game thread.
+int RespawnSlot(int slot);
 
 // Ready Up never runs its match flow while the core is disabled (no plugin loads then).
 inline bool IsDisabled() { return false; }
