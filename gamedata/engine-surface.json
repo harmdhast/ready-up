@@ -1,7 +1,7 @@
 {
   "_meta": {
-    "game_version": "1.41.8.4",
-    "steam_buildid": 25515854,
+    "game_version": "1.41.9.0",
+    "steam_buildid": 25815307,
     "binary": "game/csgo/bin/linuxsteamrt64/libserver.so",
     "notes": [
       "Repo-owned engine surface for Ready Up. This file (or the copy embedded in the shim at build time) is the only source of signatures; the CounterStrikeSharp CDN gamedata is no longer used.",
@@ -132,6 +132,17 @@
           "window": 128
         }
       ]
+    },
+    "CBasePlayerController_SetPawn": {
+      "library": "server",
+      "linux": "55 48 8D 87 ? ? ? ? 48 89 E5 41 57 41 56 41 89 CE 41 55 45 89 CD",
+      "required": false,
+      "description": "CBasePlayerController::SetPawn(this, CBasePlayerPawn* pawn, bool, bool, bool, bool): the controller takes `pawn` as its current pawn (m_hPawn). Called (not hooked) by ru_api player_respawn with (player pawn, true, false, false, false) before CCSPlayerController::Respawn, which respawns the current pawn: a dead player who watched from the observer pawn gets the player pawn back first. Same signature and arguments as CounterStrikeSharp's; it covers the prologue's moves of the 4th and 6th arguments.",
+      "anchors": [
+        { "type": "mov_disp", "disp": 1984, "window": 64 },
+        { "type": "mov_disp", "disp": 3632, "window": 224 },
+        { "type": "caller_string", "string": "player_disconnect", "window": 288 }
+      ]
     }
   },
   "vtable_indices": {
@@ -152,10 +163,21 @@
         { "type": "mov_disp", "disp": 1080, "window": 96 },
         { "type": "mov_disp", "disp": 1088, "window": 96 }
       ]
+    },
+    "CCSPlayerController::Respawn": {
+      "linux": 276,
+      "class": "CCSPlayerController",
+      "note": "CounterStrikeSharp CCSPlayerController_Respawn offset 276. Called (not hooked) by ru_api player_respawn after CBasePlayerController_SetPawn. The target resets the controller's per-life state (reads [this+0xad8] and [this+0xac0]), marks a field changed (CNetworkTransmitComponent::StateChanged) and tail-calls the current pawn's respawn virtual.",
+      "anchors": [
+        { "type": "mov_disp", "disp": 2776, "window": 64 },
+        { "type": "mov_disp", "disp": 2752, "window": 112 },
+        { "type": "string_ref", "string": "CNetworkTransmitComponent::StateChanged(%s) @%s:%d", "window": 544 }
+      ]
     }
   },
   "rtti": {
     "CBaseEntity": { "typeinfo_name": "11CBaseEntity", "note": "Locates the CBaseEntity vtable for the NetworkStateChanged slot check." },
+    "CCSPlayerController": { "typeinfo_name": "19CCSPlayerController", "note": "Locates the controller vtable for the Respawn slot check (the practice fragment declares the same entry for ChangeTeam)." },
     "CGameEventManager": { "typeinfo_name": "17CGameEventManager", "note": "Checked on the object's vtable before any virtual call." },
     "CSchemaSystem": { "typeinfo_name": "13CSchemaSystem", "module": "schemasystem", "note": "SchemaSystem_001; checked before FindTypeScopeForModule (vtbl 13)." },
     "CSchemaSystemTypeScope": { "typeinfo_name": "22CSchemaSystemTypeScope", "module": "schemasystem", "note": "libserver.so type scope; checked before FindDeclaredClass (vtbl 2)." },
