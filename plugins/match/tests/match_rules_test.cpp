@@ -1,8 +1,10 @@
 // Offline tests for readyup/match_rules.h: rule resolution, technical pause limits, the unpause
 // rule, the auto-unpause countdown, the engine's auto 5v5 pause, the .forceready threshold, team
-// name sanitizing and the team-left forfeit timer, warmup money and the warmup weapon cleanup.
+// name sanitizing and the team-left forfeit timer, warmup money, warmup ammo and the warmup weapon
+// cleanup.
 // ctest `match_rules`.
 #include "readyup/match_rules.h"
+#include "readyup/warmup_ammo.h"
 #include "readyup/warmup_money.h"
 #include "readyup/weapon_cleanup.h"
 
@@ -272,6 +274,28 @@ static void TestSpectators() {
   CHECK(SpecCommandAllowed(false) && !SpecCommandAllowed(true));  // .spec
 }
 
+// Warmup ammo: scrim and match warmup only (not the recovery gate), when enabled; a weapon's
+// reserve never goes below the most it has had while carried.
+static void TestWarmupAmmo() {
+  CHECK(WarmupAmmoActive("scrim_warmup", true, false) && WarmupAmmoActive("match_warmup", true, false));
+  CHECK(!WarmupAmmoActive("match_warmup", false, false) && !WarmupAmmoActive("match_live", true, false));
+  CHECK(!WarmupAmmoActive("match_warmup", true, true));  // restored live round, paused
+  CHECK(!WarmupAmmoActive("practice", true, false) && !WarmupAmmoActive("idle", true, false) &&
+        !WarmupAmmoActive(nullptr, true, false));
+  ReserveLedger l;
+  CHECK(l.Keep(10, 90) == 90 && l.Keep(11, 52) == 52);  // first sight: as it is
+  l.EndPass();
+  CHECK(l.Keep(10, 60) == 90);  // reloaded: back to 90
+  CHECK(l.Keep(11, 0) == 52);   // ran dry: back to 52
+  l.EndPass();
+  CHECK(l.Keep(10, 90) == 90);  // 11 dropped this pass
+  l.EndPass();
+  CHECK(l.Keep(11, 20) == 20);  // picked up again: a new weapon to the ledger
+  l.EndPass();
+  l.Clear();
+  CHECK(l.Keep(10, 30) == 30);  // out of warmup: forgotten
+}
+
 int main() {
   TestResolve();
   TestSpectators();
@@ -284,6 +308,7 @@ int main() {
   CHECK(WarmupMoneyActive("scrim_warmup", true) && WarmupMoneyActive("match_warmup", true));
   CHECK(!WarmupMoneyActive("scrim_warmup", false) && !WarmupMoneyActive("match_live", true));
   CHECK(!WarmupMoneyActive("practice", true) && !WarmupMoneyActive("idle", true) && !WarmupMoneyActive(nullptr, true));
+  TestWarmupAmmo();
   TestWeaponCleanup();
   std::printf("match_rules: %d checks, %d failures\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;

@@ -618,6 +618,8 @@ int main(int argc, char** argv) {
   }
   Check(FramesUntil([] { return Has(Summary(), "\"ru_mode\":\"match_warmup\""); }, 2000), "mode match_warmup");
   Check(FramesUntil([] { return g_suppressed.load() == 1; }, 2000), "warmup suppresses round termination");
+  Check(FramesUntil([] { return Sent("mp_buytime 9999"); }, 2000), "match warmup rules applied");
+  Check(!Sent("sv_cheats 1") && !Sent("sv_infinite_ammo 2"), "warmup infinite ammo without sv_cheats");
   rp::TryDispatchChat(76561198000000002ull, "bob", ".ready", 3);
   rp::Frame(true);
   Check(Has(Summary(), "\"ready\":{\"ready\":1,\"total\":2}"), "bob ready (1/2)");

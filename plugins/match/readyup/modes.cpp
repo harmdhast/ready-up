@@ -748,7 +748,6 @@ static void ApplyWarmupRulesLocked(State& st) {
   const std::string respawnT = std::string("mp_respawn_on_death_t ") + (st.warmupRespawn ? "1" : "0");
   const std::string ignoreWin = std::string("mp_ignore_round_win_conditions ") + (st.warmupIgnoreWin ? "1" : "0");
   const std::string buyAny = std::string("mp_buy_anywhere ") + (st.warmupBuyAnywhere ? "1" : "0");
-  // Note: sv_infinite_ammo is cheat-protected in CS2 builds; see below.
   const int rt = std::max(1, std::min(120, st.warmupRoundTimeMinutes));
   const std::string roundTime = "mp_roundtime " + std::to_string(rt);
   const std::string roundTimeDefuse = "mp_roundtime_defuse " + std::to_string(rt);
@@ -780,19 +779,6 @@ static void ApplyWarmupRulesLocked(State& st) {
   // Warmup runs for hours: nothing drops on death (weapon_cleanup.h).
   for (const char* c : kWarmupNoDropCmds) {
     if (EnqueueServerCommand(c)) any = true;
-  }
-  if (st.warmupInfiniteAmmo) {
-    // Enable cheats so sv_infinite_ammo can apply.
-    if (EnqueueServerCommand("sv_cheats 1")) any = true;
-    if (EnqueueServerCommand("sv_infinite_ammo 2")) any = true;
-    // Try to keep cheats OFF for players; many servers still keep the cvar value.
-    if (EnqueueServerCommand("sv_cheats 0")) any = true;
-  } else {
-    // Best-effort ensure infinite ammo is OFF, then keep cheats off during warmup by default.
-    // We briefly enable cheats to ensure the cheat-protected cvar can be set back to 0.
-    if (EnqueueServerCommand("sv_cheats 1")) any = true;
-    if (EnqueueServerCommand("sv_infinite_ammo 0")) any = true;
-    if (EnqueueServerCommand("sv_cheats 0")) any = true;
   }
   if (any) {
     st.warmupRulesApplied = true;
@@ -2278,7 +2264,6 @@ void SetWarmupInfiniteAmmoEnabled(bool enabled) {
   auto& st = St();
   std::lock_guard<std::mutex> lk(st.mu);
   st.warmupInfiniteAmmo = enabled;
-  st.warmupRulesApplied = false;
 }
 
 bool WarmupInfiniteAmmoEnabled() {
