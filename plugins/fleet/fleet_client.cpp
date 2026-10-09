@@ -33,6 +33,8 @@ const char* LinkStateName(LinkState s) {
 
 namespace {
 
+json::Value NullOrStr(const std::string& s) { return s.empty() ? json::Value::Null() : json::Value::Str(s); }
+
 #if defined(FLEET_CA_PROBE)
 // Static release builds carry a compiled-in Debian CA path; use whichever bundle this host has.
 const char* SystemCaBundle() {
@@ -234,9 +236,12 @@ bool Client::Send(const std::string& type, const std::string& payloadJson, int64
 void Client::SetHelloInfo(HelloInfo info) {
   std::lock_guard<std::mutex> lk(mu_);
   const std::string state = hello_.stateJson, avail = hello_.availability;
+  std::string reason = std::move(hello_.availabilityReason), detail = std::move(hello_.availabilityDetail);
   hello_ = std::move(info);
   if (hello_.stateJson.empty()) hello_.stateJson = state.empty() ? "null" : state;
   if (hello_.availability.empty()) hello_.availability = avail.empty() ? "available" : avail;
+  hello_.availabilityReason = std::move(reason);
+  hello_.availabilityDetail = std::move(detail);
 }
 
 void Client::UpdateHealth(int players, double tickMsP99) {
@@ -262,7 +267,18 @@ bool Client::GameStalled(int64_t nowMono) const {
 void Client::SetState(const std::string& stateJson, const std::string& availability) {
   std::lock_guard<std::mutex> lk(mu_);
   if (!stateJson.empty()) hello_.stateJson = stateJson;
+  if (!availability.empty()) {
+    hello_.availability = availability;
+    hello_.availabilityReason.clear();
+    hello_.availabilityDetail.clear();
+  }
+}
+
+void Client::SetAvailability(const std::string& availability, const std::string& reason, const std::string& detail) {
+  std::lock_guard<std::mutex> lk(mu_);
   if (!availability.empty()) hello_.availability = availability;
+  hello_.availabilityReason = reason;
+  hello_.availabilityDetail = detail;
 }
 
 void Client::SetHandledTypes(std::set<std::string> types, bool wildcard) {
@@ -708,6 +724,8 @@ std::string Client::BuildHello() {
   if (!json::Parse(h.stateJson, &state)) state = json::Value::Null();
   p.Set("state", std::move(state));
   p.Set("availability", json::Value::Str(h.availability));
+  p.Set("reason", NullOrStr(h.availabilityReason));
+  p.Set("detail", NullOrStr(h.availabilityDetail));
   // The admins.set rev this server has cached: the platform sends admins.set only when it differs.
   if (h.adminsRev >= 0) p.Set("admins_rev", json::Value::Int(h.adminsRev));
   if (!h.pluginsDisabled.empty()) {
@@ -760,6 +778,8 @@ std::string Client::BuildSnapshot(const char* reason, const std::string& extraJs
   }
   p.Set("state", std::move(state));
   p.Set("availability", json::Value::Str(h.availability));
+  p.Set("availability_reason", NullOrStr(h.availabilityReason));
+  p.Set("availability_detail", NullOrStr(h.availabilityDetail));
   p.Set("config_rev", json::Value::Int(configRev));
   p.Set("admins_rev", json::Value::Int(h.adminsRev > 0 ? h.adminsRev : 0));
   // Extra members from the match plugin (map_stats), never overriding the ones above.
