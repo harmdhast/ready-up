@@ -853,6 +853,45 @@ static void TestSubstitutes() {
   CHECK(mat->players_per_team == 2);
 }
 
+static void TestAvailability() {
+  fs::AvailabilityInputs in;
+  in.localMatch = true;
+  in.localSlug = "cup-final";
+  auto a = fs::ComputeAvailability(in);
+  CHECK_STR(a.availability, "busy");
+  CHECK_STR(a.reason, "local_match");
+  CHECK_STR(a.detail, "cup-final");
+  in = {};
+  in.assigned = true;
+  in.seriesOver = true;
+  in.matchId = "m1";
+  CHECK_STR(fs::ComputeAvailability(in).reason, "awaiting_reset");
+  CHECK_STR(fs::ComputeAvailability(in).detail, "m1");
+  in.serverReset = true;
+  a = fs::ComputeAvailability(in);
+  CHECK_STR(a.availability, "available");
+  CHECK(a.reason.empty());
+  CHECK_STR(fs::AvailabilityNotice(a).Dump(), R"({"availability":"available","reason":"series_end","detail":null})");
+  in = {};
+  in.assigned = true;
+  in.matchId = "m2";
+  a = fs::ComputeAvailability(in);
+  CHECK_STR(a.availability, "busy");
+  CHECK_STR(a.reason, "assigned");
+  CHECK_STR(a.detail, "m2");
+  in = {};
+  a = fs::ComputeAvailability(in);
+  CHECK_STR(a.availability, "available");
+  CHECK_STR(fs::AvailabilityNotice(a).Dump(), R"({"availability":"available","reason":"idle","detail":null})");
+  in.draining = true;
+  in.localMatch = true;
+  in.drainReason = "cs2 update";
+  a = fs::ComputeAvailability(in);
+  CHECK_STR(a.availability, "draining");
+  CHECK_STR(a.reason, "draining");
+  CHECK_STR(a.detail, "cs2 update");
+}
+
 int main() {
   TestLiveStream();
   TestSubstitutes();
@@ -866,6 +905,7 @@ int main() {
   TestMapNames();
   TestResume();
   TestServerConfigPlan();
+  TestAvailability();
   if (g_failures) {
     std::fprintf(stderr, "fleet_state_test: %d of %d checks FAILED\n", g_failures, g_checks);
     return 1;
