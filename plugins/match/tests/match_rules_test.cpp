@@ -1,9 +1,11 @@
 // Offline tests for readyup/match_rules.h: rule resolution, technical pause limits, the unpause
 // rule, the auto-unpause countdown, the engine's auto 5v5 pause, the .forceready threshold, team
-// name sanitizing and the team-left forfeit timer, warmup money and the warmup weapon cleanup.
+// name sanitizing and the team-left forfeit timer, warmup money, the warmup score reset and the warmup
+// weapon cleanup.
 // ctest `match_rules`.
 #include "readyup/match_rules.h"
 #include "readyup/warmup_money.h"
+#include "readyup/warmup_score.h"
 #include "readyup/weapon_cleanup.h"
 
 #include <cstdio>
@@ -284,6 +286,14 @@ int main() {
   CHECK(WarmupMoneyActive("scrim_warmup", true) && WarmupMoneyActive("match_warmup", true));
   CHECK(!WarmupMoneyActive("scrim_warmup", false) && !WarmupMoneyActive("match_live", true));
   CHECK(!WarmupMoneyActive("practice", true) && !WarmupMoneyActive("idle", true) && !WarmupMoneyActive(nullptr, true));
+  // Warmup score reset: scrim and match warmup, not the recovery gate of a restored match, not
+  // once go-live is pending, not before the warmup's map has loaded.
+  CHECK(WarmupScoreResetActive("scrim_warmup", false, false, true) && WarmupScoreResetActive("match_warmup", false, false, true));
+  CHECK(!WarmupScoreResetActive("match_warmup", true, false, true) && !WarmupScoreResetActive("match_warmup", false, true, true));
+  CHECK(!WarmupScoreResetActive("match_warmup", false, false, false) && !WarmupScoreResetActive("scrim_warmup", false, false, false));
+  CHECK(!WarmupScoreResetActive("scrim_warmup", false, true, true) && !WarmupScoreResetActive("match_live", false, false, true));
+  CHECK(!WarmupScoreResetActive("match_knife", false, false, true) && !WarmupScoreResetActive("practice", false, false, true));
+  CHECK(!WarmupScoreResetActive("idle", false, false, true) && !WarmupScoreResetActive(nullptr, false, false, true));
   TestWeaponCleanup();
   std::printf("match_rules: %d checks, %d failures\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;

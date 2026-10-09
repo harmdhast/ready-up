@@ -574,6 +574,7 @@ void ApplyLoadedMatch(const WebhookMatchContext& loaded, const std::string& conf
     // CS2 reads game_type / game_mode at the map load: competitive, or wingman (wingman.h).
     for (const auto& c : wingman::GameModeCommands(ctx.wingman)) (void)EnqueueServerCommand(c.c_str());
     if (ctx.wingman) PrintLine("match: wingman - game_type 0 / game_mode 2 for the map load");
+    ModesAwaitMapLoad();  // the server's map and score until then
     (void)LoadMapEntry(ctx.maplist[idx]);
   }
 }

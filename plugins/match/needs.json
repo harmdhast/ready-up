@@ -64,7 +64,8 @@
     "CSMatchStats_t.m_iAssists",
     "CSMatchStats_t.m_iDeaths",
     "CSMatchStats_t.m_iHeadShotKills",
-    "CSMatchStats_t.m_iKills"
+    "CSMatchStats_t.m_iKills",
+    "CTeam.m_iScore"
   ],
   "events": [
     "bomb_defused",

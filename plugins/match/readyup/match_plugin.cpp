@@ -23,6 +23,7 @@
 #include "readyup/host.h"
 #include "readyup/idle_refresh.h"
 #include "readyup/warmup_money.h"
+#include "readyup/warmup_score.h"
 #include "readyup/weapon_cleanup.h"
 #include "readyup/local_store.h"
 #include "readyup/simulation.h"
@@ -188,6 +189,7 @@ void OnTick(void*, const ru_tick_info* t) {
       DamageReportTick();       // damage reports built at round_end (damage_report.h)
       VotesTick(t->now);        // .gg / .stop vote timeouts (votes.h)
       WarmupMoneyTick(t->now);  // warmup money top-up (warmup_money.h)
+      WarmupScoreTick(t->now);  // no round counts in warmup (warmup_score.h)
       match_settings::Tick(t->now);  // autoready, kick_when_no_match_loaded, hostname_format
       WeaponCleanupTick(t->now);  // dropped weapons in warmup (weapon_cleanup.h)
       CoachTick(t->now);          // coaches: m_iCoachingTeam, sv_coaching_enabled (coach.h)
@@ -434,6 +436,7 @@ READYUP_PLUGIN_EXPORT int readyup_plugin_load(const ru_api* api, uint32_t core_a
     DamageReportInstall(api);   // end-of-round damage report
     VotesInstall(api);          // .gg / .stop
     WarmupMoneyInstall(api);    // warmup money top-up
+    WarmupScoreInstall(api);    // warmup score reset
     WeaponCleanupInstall(api);  // dropped weapons in warmup
     EsportsInstall(api);  // default_models (player_spawn), halftime pause
     api->set_admin_provider(api->self, &AdminProvider, nullptr);
