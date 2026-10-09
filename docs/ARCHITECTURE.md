@@ -307,6 +307,29 @@ Users: practice `.fas` / `.watchme` (everyone else to the spectators), `.showspa
 `m_lifeState` written before `entity_spawn`), the view angle of `.loadnade`, `.last`, `.back N`
 and `.loadpos`; match `.spec`.
 
+### v1.14 (implemented)
+
+Respawning one player. Same engine module and feature table as 1.13 (`practice_engine.cpp`,
+`practice_engine_spec.h`), member in `plugin_engine_api.cpp`.
+
+| Member | Thread | Purpose |
+|---|---|---|
+| `player_respawn(self, slot)` | game | The dead player in `slot` (bots too) on T / CT respawns on their player pawn: `CBasePlayerController::SetPawn(pawn, true, false, false, false)` then `CCSPlayerController::Respawn`, as CounterStrikeSharp's `Respawn()`. Refused: bad slot, alive, not on T / CT, no pawn. Feature `"respawn"` in `engine_feature_available` |
+
+The entries are the core's (`engine-surface.json`), since match warmup needs them without the
+practice component. `CCSPlayerController::Respawn` [276] is an anchors-only `vtable_indices` entry
+(no byte signature): two `mov_disp` field reads and a `string_ref` of the network state-change
+message; the call goes to the verified slot target after the controller's vptr check. SetPawn is a
+signature (CounterStrikeSharp's) with two `mov_disp` and a `caller_string` `player_disconnect`.
+Respawn works on the controller's current pawn, which is the observer pawn after a death, hence
+SetPawn first. Both are optional (`API_SURFACE` maps `player_respawn` to the entity system only):
+a break turns respawn off. The core declares `rtti` `CCSPlayerController` too; a fragment may
+repeat an rtti entry with the same typeinfo name and module (the practice one does). Verified on
+CS2 1.41.9.0 (`readyup_sigcheck`).
+
+User: match warmup respawns a human who joins T / CT, or whom the roster team lock moved, instead
+of restarting the warmup round (`mp_restartgame 1` stays the fallback without the feature).
+
 ### ABI rules
 
 1. **Plain C across the boundary.** No C++ classes, references, STL, `std::string` or
@@ -525,7 +548,7 @@ How it talks to the core, all through `ru_api` v1.1:
 **Gamedata fragment.** The engine entries only skins uses (the econ/model functions and the
 `CEntityInstance::NetworkStateChanged` slot) moved from `engine-surface.json` to
 `gamedata/engine-surface.skins.json`. The core merges every `engine-surface.<name>.json` next to
-the shim at load (entries may only be added, never overridden); the skins packages ship the
+the shim at load (entries may only be added, never overridden; an identical rtti entry is shared); the skins packages ship the
 fragment, the others do not. `readyup_sigcheck` / `readyup_hookcheck` take fragments as extra
 arguments and `scripts/ci/verify-cs2.sh` passes every fragment in `gamedata/`.
 `dev-deploy.sh --plugin skins` installs the fragment too (a new fragment needs `--restart`).
