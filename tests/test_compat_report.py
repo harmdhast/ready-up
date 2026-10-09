@@ -311,6 +311,7 @@ class CompatReportTest(unittest.TestCase):
         for k in entries:
             self.assertIn('"%s"' % k, spec, k)
         self.assertEqual(owner.get(("signature", "CBasePlayerController_SetPawn")), "core")
+        self.assertEqual(owner.get(("rtti", "CCSPlayerController")), "core")
         fn = core["functions"]["CBasePlayerController_SetPawn"]
         self.assertFalse(fn["required"])
         self.assertGreaterEqual(len(fn["anchors"]), 2)

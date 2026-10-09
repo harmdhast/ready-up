@@ -133,7 +133,7 @@ def ownership(files):
                 owner[("hook_site", name)] = cid
                 hooked.add(name)
         for name in (d.get("rtti") or {}):
-            owner[("rtti", name)] = cid
+            owner.setdefault(("rtti", name), cid)  # a fragment repeating the base's entry shares it
         for name in (d.get("vtable_indices") or {}):
             owner[("vtable", name)] = cid
         for name in (d.get("layouts") or {}):
