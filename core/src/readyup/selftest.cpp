@@ -264,7 +264,7 @@ void AddFunchookSites(Report& r, const es::EngineSurface& s) {
     std::string role;
     if (f.name == "Host_Say") {
       live = HostSayHookInstalled();
-      role = "chat fallback";
+      role = "chat";
     } else if (f.name == "CCSGameRules_TerminateRound") {
       live = RoundTerminationHookInstalled();
       role = "installed on first warmup/practice suppression";

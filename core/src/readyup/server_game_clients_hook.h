@@ -4,8 +4,8 @@
 
 namespace readyup {
 
-// Installs a vtable hook on the server's ISource2GameClients::ClientCommand (jointeam welcome
-// trigger, `.ru`/`.r` routing with a reliable sender, admin/captain chat prefix relay).
+// Installs a vtable hook on the server's ISource2GameClients::ClientCommand (console `ru`, chat
+// handling for builds that send `say` here).
 //
 // The slot is verified first (engine-surface vtable_indices "ISource2GameClients::ClientCommand":
 // CSource2GameClients vtable located via RTTI, slot target anchors incl. the CCommand argc/argv

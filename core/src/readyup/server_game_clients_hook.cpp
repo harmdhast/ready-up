@@ -1,9 +1,7 @@
 #include "readyup/server_game_clients_hook.h"
-#include "readyup/plugin_loader.h"
 
 #include "readyup/ccommand.h"
-#include "readyup/chat.h"
-#include "readyup/config.h"
+#include "readyup/chat_intercept.h"
 #include "readyup/engine_surface.h"
 #include "readyup/logging.h"
 #include "readyup/ru_router.h"
@@ -13,7 +11,6 @@
 #include <unistd.h>
 
 #include <atomic>
-#include <cctype>
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
@@ -52,24 +49,6 @@ static bool PatchVtable(void** vtable, int index, void* replacement, void** outO
   return true;
 }
 
-static std::string StripChatColorBytes(const std::string& s) {
-  std::string out;
-  out.reserve(s.size());
-  for (unsigned char c : s) {
-    // Skip common CS chat color control bytes (1..16).
-    if (c >= 1 && c <= 16) continue;
-    out.push_back(static_cast<char>(c));
-  }
-  return out;
-}
-
-static bool HasPrefixAlready(const std::string& name, const std::string& prefix) {
-  const std::string want = StripChatColorBytes(prefix);
-  if (want.empty()) return false;
-  const std::string stripped = StripChatColorBytes(name);
-  return stripped.rfind(want + " ", 0) == 0;
-}
-
 static void Hook_ClientCommand(void* thisptr, CPlayerSlot slot, const void* args) {
   if (!g_origClientCommand) return;
 
@@ -106,46 +85,8 @@ static void Hook_ClientCommand(void* thisptr, CPlayerSlot slot, const void* args
   const bool isTeamOnly = (cmd == "say_team");
   const std::string msg = CCommandArgString(*argv);
 
-  // Handle `.ru ...` directly here so we have a reliable sender (SteamID64 + name + slot).
-  // `.ru` visibility is configurable (consume_ru_chat).
-  if (msg.rfind(".ru", 0) == 0) {
-    Debug("client-command: saw .ru msg=\"%s\"\n", msg.c_str());
-    RouteChatCommand(ident->steamid64, ident->name, msg, slotNum);
-    if (ConsumeRuChat()) return;
-  }
-  // Plugin chat commands: routed here with the sender's slot (the log listener's copy of the
-  // line is deduped); RU_CMD_HIDE swallows the line before the engine prints it.
-  {
-    std::string first = msg.substr(0, msg.find_first_of(" \t"));
-    for (char& c : first) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    uint32_t flags = 0;
-    if (first.size() > 1 && first != ".ru" && plugins::ChatCommandOwned(first, &flags)) {
-      Debug("client-command: plugin chat command \"%s\" (hide=%d)\n", first.c_str(), (flags & RU_CMD_HIDE) ? 1 : 0);
-      RouteChatCommand(ident->steamid64, ident->name, msg, slotNum);
-      if (flags & RU_CMD_HIDE) return;
-    }
-  }
-
-  // Chat name prefix a plugin set for this player (set_chat_name_prefix; readyup-match sets the
-  // admin / captain prefixes): relay a prefixed line and consume the original to avoid
-  // duplicates. (A "true" prefix via a temporary name swap needs IVEngineServer::ClientCommand,
-  // which is not part of the verified engine surface.)
-  std::string prefix;
-  if (!plugins::PluginChatPrefixFor(ident->steamid64, &prefix) || prefix.empty()) {
-    return g_origClientCommand(thisptr, slot, args);
-  }
-  // Team chat stays with the engine: the relay below reaches every player, so a prefixed
-  // say_team (a captain's or an admin's) leaked to the other team. Without the prefix, but private.
-  if (isTeamOnly) return g_origClientCommand(thisptr, slot, args);
-  if (HasPrefixAlready(ident->name, prefix) || msg.empty()) return g_origClientCommand(thisptr, slot, args);
-  std::string line;
-  line.reserve(prefix.size() + ident->name.size() + msg.size() + 32);
-  line += prefix;
-  line += " ";
-  line += ident->name;
-  line += ": ";
-  line += msg;
-  SendRawToChat(line.c_str());
+  if (HandlePlayerChat(slotNum, msg, isTeamOnly)) return;
+  return g_origClientCommand(thisptr, slot, args);
 }
 
 }  // namespace

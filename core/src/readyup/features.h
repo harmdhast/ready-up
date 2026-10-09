@@ -21,7 +21,7 @@ enum class Feature : int {
   WelcomeHtml,           // per-client center HTML welcome screen
   RoundTermSuppression,  // warmup/practice TerminateRound suppression
   Events,                // engine game events (round lifecycle + stats)
-  ClientCommandHook,     // jointeam welcome trigger, chat routing with a reliable sender, prefix relay
+  ClientCommandHook,     // console `ru`, chat on builds that send `say` to ClientCommand
   PlayerChatPrint,       // chat to a single player
   ReadyHud,              // per-player ready list / knife pick panel (center HTML)
   HudBrand,              // hud_brand / hud_logo_url header on the welcome card and ready HUD
