@@ -17,6 +17,16 @@ constexpr const char* kNo = "#F87171";
 
 std::string HudFont(const char* color, const std::string& inner);
 
+// HTML-escaped text, cut at maxBytes on a UTF-8 boundary (".." marks the cut); control chars dropped.
+std::string HudEscape(const std::string& in, size_t maxBytes);
+
+// Panel header "Brand · STATUS": brand gold, status bold in statusColor. `brand` is plain text (cut at
+// 40 bytes); empty brand draws the status alone. Text only: panels resent every frame carry no image.
+std::string HudHeader(const std::string& brand, const char* statusColor, const std::string& status);
+
+// "3/10 READY" in the large font: gold while waiting, green when everyone is ready.
+std::string ReadyHudCountLine(int ready, int total);
+
 // Name shown for a player in the ready panel: the connected name, else the name from the match
 // config roster, else the name the server last saw, else "#" + the last 4 digits of the Steam ID.
 std::string ReadyHudDisplayName(uint64_t steamid64, const std::string& connected, const std::string& roster,

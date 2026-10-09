@@ -86,31 +86,6 @@ constexpr const char* kTestPngWiki =
     "https://upload.wikimedia.org/wikipedia/commons/thumb/4/47/PNG_transparency_demonstration_1.png/"
     "250px-PNG_transparency_demonstration_1.png";
 
-static std::string Esc(const std::string& in, size_t maxBytes) {
-  std::string s = in;
-  if (s.size() > maxBytes) {
-    size_t cut = maxBytes;
-    while (cut > 0 && (static_cast<unsigned char>(s[cut]) & 0xC0) == 0x80) --cut;
-    s.resize(cut);
-    s += "..";
-  }
-  std::string out;
-  out.reserve(s.size() + 8);
-  for (char c : s) {
-    switch (c) {
-      case '<': out += "&lt;"; break;
-      case '>': out += "&gt;"; break;
-      case '&': out += "&amp;"; break;
-      case '"': out += "&quot;"; break;
-      case '\'': out += "&#39;"; break;
-      default:
-        if (static_cast<unsigned char>(c) >= 0x20) out += c;
-        break;
-    }
-  }
-  return out;
-}
-
 static std::string Font(const char* color, const std::string& inner) { return HudFont(color, inner); }
 
 // A URL that can sit inside a single-quoted HTML attribute (http/https only).
@@ -245,7 +220,7 @@ static std::string SideLine(const Board& b, int side, uint64_t viewer) {
       continue;
     }
     used += len;
-    const std::string nm = Esc(e->name, kMaxNameBytes);
+    const std::string nm = HudEscape(e->name, kMaxNameBytes);
     waiting.push_back(e->sid == viewer ? "<b>" + nm + "</b>" : nm);
   }
   const int idx = side == 3 ? 0 : 1;
@@ -290,7 +265,7 @@ static std::string KnifeHtml(const KnifeHudInfo& k, int viewerSide) {
     return h;
   }
   const char* col = (k.winnerCs == 3) ? kCt : kT;
-  h += Font(col, "<b>" + Esc(k.winnerName, 24) + "</b>") + " won";
+  h += Font(col, "<b>" + HudEscape(k.winnerName, 24) + "</b>") + " won";
   if (!k.reasonShort.empty()) h += " " + Font(kGrey, "(" + k.reasonShort + ")");
   h += "<br>";
   const std::string secs = std::to_string(k.secondsLeft) + "s";
@@ -298,7 +273,7 @@ static std::string KnifeHtml(const KnifeHudInfo& k, int viewerSide) {
     h += Font(kOk, "type <b>.stay</b> or <b>.switch</b>") + "<br>";
     h += Font(kGrey, "no pick in " + secs + " = stay");
   } else {
-    h += Font(kGrey, "waiting for " + Esc(k.winnerName, 24) + " to pick a side &#183; " + secs);
+    h += Font(kGrey, "waiting for " + HudEscape(k.winnerName, 24) + " to pick a side &#183; " + secs);
   }
   return h;
 }
@@ -310,17 +285,17 @@ static std::string LiveHtml(const LiveHudInfo& l) {
   if (l.paused) {
     if (l.type == "tactical") {
       h += Font(kGold, "<b>TACTICAL TIMEOUT</b>");
-      if (!l.byTeam.empty()) h += "<br>" + Esc(l.byTeam, 24);
+      if (!l.byTeam.empty()) h += "<br>" + HudEscape(l.byTeam, 24);
     } else if (l.type == "technical") {
       h += Font(kNo, "<b>TECHNICAL PAUSE</b>");
-      if (!l.byTeam.empty()) h += " " + Font(kGrey, "by " + Esc(l.byTeam, 24));
+      if (!l.byTeam.empty()) h += " " + Font(kGrey, "by " + HudEscape(l.byTeam, 24));
       if (l.pendingFreeze) {
         h += "<br>" + Font(kGrey, "pausing at freeze time");
       } else if (l.secondsLeft >= 0) {
         h += "<br>auto-unpause in <b>" + std::to_string(l.secondsLeft / 60) + ":" +
              (l.secondsLeft % 60 < 10 ? "0" : "") + std::to_string(l.secondsLeft % 60) + "</b>";
       }
-      auto mark = [&](bool ok, const std::string& n) { return Font(ok ? kOk : kDim, (ok ? "&#10004; " : "&#10006; ") + Esc(n, 16)); };
+      auto mark = [&](bool ok, const std::string& n) { return Font(ok ? kOk : kDim, (ok ? "&#10004; " : "&#10006; ") + HudEscape(n, 16)); };
       h += "<br>" + Font(kGrey, l.bothRequired ? "both teams: " : "pausing team: ") + "<b>.unpause</b><br>" +
            mark(l.team1Confirmed, l.team1) + " &#183; " + mark(l.team2Confirmed, l.team2);
     } else if (l.type == "halftime" || l.type == "auto_5v5" || l.type == "restore") {
@@ -332,9 +307,9 @@ static std::string LiveHtml(const LiveHudInfo& l) {
         h += Font(kGold, "<b>ROUND RESTORED</b>");
       } else {
         h += Font(kNo, "<b>NOT 5v5 - PAUSED</b>");
-        if (!l.byTeam.empty()) h += "<br>" + Font(kGrey, Esc(l.byTeam, 24) + " is short");
+        if (!l.byTeam.empty()) h += "<br>" + Font(kGrey, HudEscape(l.byTeam, 24) + " is short");
       }
-      auto mark = [&](bool ok, const std::string& n) { return Font(ok ? kOk : kDim, (ok ? "&#10004; " : "&#10006; ") + Esc(n, 16)); };
+      auto mark = [&](bool ok, const std::string& n) { return Font(ok ? kOk : kDim, (ok ? "&#10004; " : "&#10006; ") + HudEscape(n, 16)); };
       h += "<br>" + Font(kGrey, "both teams: ") + "<b>.unpause</b><br>" + mark(l.team1Confirmed, l.team1) +
            " &#183; " + mark(l.team2Confirmed, l.team2);
     } else {
@@ -343,7 +318,7 @@ static std::string LiveHtml(const LiveHudInfo& l) {
   }
   if (l.forfeit) {
     if (!h.empty()) h += "<br>";
-    h += Font(kNo, "<b>" + Esc(l.forfeitTeam, 24) + " LEFT</b>") + "<br>forfeit in <b>" +
+    h += Font(kNo, "<b>" + HudEscape(l.forfeitTeam, 24) + " LEFT</b>") + "<br>forfeit in <b>" +
          std::to_string(l.forfeitSecondsLeft / 60) + ":" + (l.forfeitSecondsLeft % 60 < 10 ? "0" : "") +
          std::to_string(l.forfeitSecondsLeft % 60) + "</b> unless a player reconnects";
   }
@@ -383,7 +358,7 @@ static std::string TestHtml(int n) {
       const auto c = Cfg();
       const std::string url = AttrSafeUrl(c.hud_logo_url);
       std::string h = title + HudBrandHtml(24, "fontSize-l") + "<br>";
-      h += Font(kGrey, "hud_logo_url=" + (url.empty() ? std::string("(none)") : Esc(url, 80)));
+      h += Font(kGrey, "hud_logo_url=" + (url.empty() ? std::string("(none)") : HudEscape(url, 80)));
       if (!c.hud_logo_url.empty() && url.empty()) h += "<br>" + Font(kNo, "hud_logo_url rejected (needs http(s), no quotes/spaces)");
       return h;
     }
@@ -449,7 +424,7 @@ std::string HudBrandHtml(int imgHeight, const char* fontClass) {
     if (!h.empty()) h += " ";
     h += "<font ";
     if (fontClass && *fontClass) h += std::string("class='") + fontClass + "' ";
-    h += std::string("color='") + kGold + "'><b>" + Esc(c.hud_brand, 40) + "</b></font>";
+    h += std::string("color='") + kGold + "'><b>" + HudEscape(c.hud_brand, 40) + "</b></font>";
   }
   return h;
 }

@@ -1,4 +1,4 @@
-// Offline tests for the ready panel's player names and team lines (readyup/ready_hud_logic.h).
+// Offline tests for the ready panel's player names, team lines, header and count line (readyup/ready_hud_logic.h).
 // ctest `match_ready_hud`.
 #include "readyup/ready_hud_logic.h"
 
@@ -48,9 +48,34 @@ static void TestTeamLine() {
   CHECK(Has(ReadyHudTeamLine(true, 0, 0, {}, 0, 0), "-"));
 }
 
+static void TestHeader() {
+  const std::string h = HudHeader("Auto Tournament", kGold, "WARMUP");
+  CHECK(h == "<font color='#FFD23F'><b>Auto Tournament</b></font> <font color='#8A8F98'>&#183;</font> "
+             "<font color='#FFD23F'><b>WARMUP</b></font>");
+  CHECK(HudHeader("", kOk, "KNIFE IN 3") == "<font color='#7CD35A'><b>KNIFE IN 3</b></font>");
+  CHECK(Has(HudHeader("A<b>", kNo, "X"), "A&lt;b&gt;"));
+  CHECK(!Has(HudHeader("Auto Tournament", kGold, "WARMUP"), "<img"));
+}
+
+static void TestCountLine() {
+  CHECK(ReadyHudCountLine(3, 10) == "<font class='fontSize-l' color='#FFD23F'><b>3/10 READY</b></font>");
+  CHECK(Has(ReadyHudCountLine(10, 10), "color='#7CD35A'"));
+  CHECK(Has(ReadyHudCountLine(0, 0), "color='#FFD23F'"));
+}
+
+static void TestEscape() {
+  CHECK(HudEscape("a<&>'\"", 40) == "a&lt;&amp;&gt;&#39;&quot;");
+  // 16-byte cut never splits a UTF-8 sequence: nine "é" are 18 bytes.
+  CHECK(HudEscape("\xC3\xA9\xC3\xA9\xC3\xA9\xC3\xA9\xC3\xA9\xC3\xA9\xC3\xA9\xC3\xA9\xC3\xA9", 16) ==
+        "\xC3\xA9\xC3\xA9\xC3\xA9\xC3\xA9\xC3\xA9\xC3\xA9\xC3\xA9\xC3\xA9..");
+}
+
 int main() {
   TestDisplayName();
   TestTeamLine();
+  TestHeader();
+  TestCountLine();
+  TestEscape();
   if (g_failures != 0) {
     std::fprintf(stderr, "%d of %d checks failed\n", g_failures, g_checks);
     return 1;
