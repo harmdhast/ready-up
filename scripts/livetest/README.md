@@ -122,8 +122,8 @@ match (or `ru mode idle` in cleanup) Ready Up kicks the bots and puts `bot_quota
 `bot_join_team any` and `bot_join_after_player 1` back. CI (`cs2-dynamic.yml`) runs the match
 this way. Not with `--scrim`, `--forfeit` or `--ruleset valve`.
 
-The server must log (`log on`, which csm's server.cfg sets): the knife winner, round ends and
-the bots' sides come from game log lines.
+Ready Up turns on game logging (`log on`) at startup: the knife winner, round ends and the
+bots' sides come from game log lines.
 
 ### Knife round time
 
