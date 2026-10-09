@@ -1195,6 +1195,12 @@ static void ResetPracticeRulesLocked(State& st) {
 
 }  // namespace
 
+// A joiner is spawned only in the match warmup itself: not once going live was triggered (the
+// go-live restart spawns everyone) nor in a recovered live map's gate (its restored round stands).
+static bool JoinSpawnApplies(const State& st) {
+  return st.mode == ReadyUpMode::MatchWarmup && !st.startTriggered && !st.recoveryGate;
+}
+
 // Restarts the match warmup round so everyone spawns. Debounced: a few joins (and a team-lock
 // move) land in the same restart.
 static void RestartWarmupRoundForJoiner() {
@@ -1209,7 +1215,7 @@ static void RestartWarmupRoundForJoiner() {
     {
       auto& st = St();
       std::lock_guard<std::mutex> lk(st.mu);
-      if (st.mode != ReadyUpMode::MatchWarmup) return;
+      if (!JoinSpawnApplies(st)) return;
     }
     (void)EnqueueServerCommand("mp_restartgame 1");
     DebugLine("modes: warmup round restarted so a joining player spawns");
@@ -1221,7 +1227,7 @@ void ModesOnHumanJoinedTeam(int slot, int team) {
   {
     auto& st = St();
     std::lock_guard<std::mutex> lk(st.mu);
-    if (st.mode != ReadyUpMode::MatchWarmup) return;
+    if (!JoinSpawnApplies(st)) return;
   }
   if (slot < 0 || !RespawnAvailable()) {
     RestartWarmupRoundForJoiner();
@@ -1232,7 +1238,7 @@ void ModesOnHumanJoinedTeam(int slot, int team) {
     {
       auto& st = St();
       std::lock_guard<std::mutex> lk(st.mu);
-      if (st.mode != ReadyUpMode::MatchWarmup) return;
+      if (!JoinSpawnApplies(st)) return;
     }
     for (const auto& x : ListHumans()) {
       if (x.slot != slot || (x.team != 2 && x.team != 3)) continue;

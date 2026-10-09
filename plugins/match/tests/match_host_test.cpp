@@ -790,6 +790,21 @@ int main(int argc, char** argv) {
   Check(Logged("playout_enabled_default = off"), "ru settings default");
   Check(Logged("series_end_kick_delay_no_demo = 12"), "ru settings set takes the kick delays too");
 
+  std::puts("-- go-live pending (still match warmup): a join neither respawns nor restarts");
+  ClearLog();
+  ClearCmds();
+  rp::TryDispatchChat(76561198000000001ull, "alice", ".ready", 2);
+  rp::Frame(true);
+  Check(FramesUntil([] { return Sent("mp_restartgame 1"); }, 3000), "all ready: going live");
+  Check(Has(Summary(), "\"ru_mode\":\"match_warmup\""), "match warmup until the live round starts");
+  ClearLog();
+  ClearCmds();
+  g_respawned.clear();
+  g_players.back().team = 0;
+  Check(FramesUntil([] { return Logged("ready: moved bob to T"); }, 6000), "the team lock still moves bob");
+  Check(!FramesUntil([&] { return respawned(3) || Sent("mp_restartgame 1"); }, 2500),
+        "no respawn and no extra restart while going live");
+
   std::puts("-- unload");
   ClearLog();
   rp::HandlePluginCommand({"unload", "match"}, false);
