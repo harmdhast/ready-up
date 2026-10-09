@@ -32,10 +32,11 @@ std::string ReadyHudCountLine(int ready, int total);
 std::string ReadyHudDisplayName(uint64_t steamid64, const std::string& connected, const std::string& roster,
                                 const std::string& observed);
 
-// One team line of the ready panel: "CT 1/5 · waiting: a, b +2 ✔4 bots", or "CT 5/5 · ready" when the
-// team is complete. `waiting` holds already escaped HTML names; `hidden` is the overflow count.
+// One team line of the ready panel: "Navi 1/5 · waiting: a, b +2 ✔4 bots", or "Navi 5/5 · ready" when
+// the team is complete. `label` (team name or CT / T) and `waiting` are already escaped HTML; the label
+// takes the side color, the count is gold until the team is full. `hidden` is the overflow count.
 // total 0 (nobody on the side) draws "CT -".
-std::string ReadyHudTeamLine(bool ct, int ready, int total, const std::vector<std::string>& waiting, int hidden,
+std::string ReadyHudTeamLine(bool ct, const std::string& label, int ready, int total, const std::vector<std::string>& waiting, int hidden,
                              int bots);
 
 }  // namespace readyup

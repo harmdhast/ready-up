@@ -52,12 +52,12 @@ std::string ReadyHudDisplayName(uint64_t steamid64, const std::string& connected
   return "#" + s.substr(s.size() > 4 ? s.size() - 4 : 0);
 }
 
-std::string ReadyHudTeamLine(bool ct, int ready, int total, const std::vector<std::string>& waiting, int hidden,
+std::string ReadyHudTeamLine(bool ct, const std::string& label, int ready, int total, const std::vector<std::string>& waiting, int hidden,
                              int bots) {
-  std::string s = HudFont(ct ? kCt : kT, ct ? "<b>CT</b>" : "<b>T</b>");
+  std::string s = HudFont(ct ? kCt : kT, "<b>" + label + "</b>");
   const bool full = total > 0 && ready >= total;
   if (total > 0) {
-    s += " " + HudFont(full ? kOk : kNo, "<b>" + std::to_string(ready) + "/" + std::to_string(total) + "</b>");
+    s += " " + HudFont(full ? kOk : kGold, "<b>" + std::to_string(ready) + "/" + std::to_string(total) + "</b>");
   }
   if (full) {
     s += " " + HudFont(kOk, "&#183; ready");

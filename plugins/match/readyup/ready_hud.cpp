@@ -224,7 +224,7 @@ static std::string SideLine(const Board& b, int side, uint64_t viewer) {
     waiting.push_back(e->sid == viewer ? "<b>" + nm + "</b>" : nm);
   }
   const int idx = side == 3 ? 0 : 1;
-  return ReadyHudTeamLine(side == 3, b.sideReady[idx], b.sideTotal[idx], waiting, hidden, side == 3 ? b.botsCt : b.botsT);
+  return ReadyHudTeamLine(side == 3, side == 3 ? "CT" : "T", b.sideReady[idx], b.sideTotal[idx], waiting, hidden, side == 3 ? b.botsCt : b.botsT);
 }
 
 static std::string ReadyHtml(const Board& b, uint64_t viewer, const std::string& footer) {

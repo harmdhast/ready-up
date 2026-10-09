@@ -35,17 +35,19 @@ static void TestDisplayName() {
 static bool Has(const std::string& s, const std::string& sub) { return s.find(sub) != std::string::npos; }
 
 static void TestTeamLine() {
-  const std::string waiting = ReadyHudTeamLine(true, 1, 5, {"Dummy CT1", "<b>Me</b>"}, 2, 0);
-  CHECK(Has(waiting, "<font color='#F87171'><b>1/5</b></font>"));
-  CHECK(Has(waiting, "waiting:") && Has(waiting, "Dummy CT1, <b>Me</b>") && Has(waiting, "+2"));
-  CHECK(!Has(waiting, "ready</font>"));
-  CHECK(Has(waiting, "<font color='#8A8F98'>&#183; waiting: Dummy CT1, <b>Me</b></font>"));
+  const std::string waiting = ReadyHudTeamLine(true, "Navi", 1, 5, {"Dummy CT1", "<b>Me</b>"}, 2, 0);
+  CHECK(Has(waiting, "<font color='#5EA8FF'><b>Navi</b></font>"));
+  CHECK(Has(waiting, "<font color='#FFD23F'><b>1/5</b></font>"));
+  CHECK(!Has(waiting, "#F87171"));
+  CHECK(Has(waiting, "<font color='#8A8F98'>&#183; waiting: Dummy CT1, <b>Me</b></font>") && Has(waiting, "+2"));
 
-  const std::string full = ReadyHudTeamLine(false, 5, 5, {}, 0, 0);
-  CHECK(Has(full, "<font color='#7CD35A'><b>5/5</b></font>") && Has(full, "&#183; ready") && !Has(full, "waiting"));
+  const std::string full = ReadyHudTeamLine(false, "T", 5, 5, {}, 0, 0);
+  CHECK(Has(full, "<font color='#FF9D3B'><b>T</b></font>") && Has(full, "<font color='#7CD35A'><b>5/5</b></font>"));
+  CHECK(Has(full, "&#183; ready") && !Has(full, "waiting"));
 
-  CHECK(Has(ReadyHudTeamLine(true, 0, 5, {"A"}, 0, 2), "&#10004;2 bots"));
-  CHECK(Has(ReadyHudTeamLine(true, 0, 0, {}, 0, 0), "-"));
+  CHECK(Has(ReadyHudTeamLine(true, "a&amp;b", 0, 5, {"A"}, 0, 0), "<b>a&amp;b</b>"));
+  CHECK(Has(ReadyHudTeamLine(true, "CT", 0, 5, {"A"}, 0, 2), "&#10004;2 bots"));
+  CHECK(Has(ReadyHudTeamLine(true, "CT", 0, 0, {}, 0, 0), "-"));
 }
 
 static void TestHeader() {
