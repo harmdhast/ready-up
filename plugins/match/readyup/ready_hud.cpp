@@ -39,15 +39,8 @@ using Clock = std::chrono::steady_clock;
 
 constexpr int kMaxNamesPerSide = 6;
 constexpr size_t kMaxNameBytes = 12;
-
-// Palette (matches the welcome screen).
-constexpr const char* kCt = "#5EA8FF";
-constexpr const char* kT = "#FF9D3B";
-constexpr const char* kGold = "#FFD23F";
-constexpr const char* kGrey = "#8A8F98";
-constexpr const char* kDim = "#5B6068";
-constexpr const char* kOk = "#7CD35A";
-constexpr const char* kNo = "#F87171";
+// Names in one waiting list, so a side line fits the panel (the rest show as "+N").
+constexpr size_t kMaxWaitingBytes = 40;
 
 struct Entry {
   uint64_t sid = 0;
@@ -65,6 +58,8 @@ struct Board {
   int botsT = 0;
   int ready = 0;
   int total = 0;
+  int sideReady[2] = {0, 0};  // [0] CT, [1] T
+  int sideTotal[2] = {0, 0};
   bool tallied = false;  // ready/total set per team (match); else counted from entries (scrim)
   bool scrim = false;
   std::string note;  // e.g. "need players on both CT and T" (empty when none)
@@ -116,9 +111,7 @@ static std::string Esc(const std::string& in, size_t maxBytes) {
   return out;
 }
 
-static std::string Font(const char* color, const std::string& inner) {
-  return std::string("<font color='") + color + "'>" + inner + "</font>";
-}
+static std::string Font(const char* color, const std::string& inner) { return HudFont(color, inner); }
 
 // A URL that can sit inside a single-quoted HTML attribute (http/https only).
 static std::string AttrSafeUrl(const std::string& url) {
@@ -207,6 +200,9 @@ static Board BuildBoard(ReadyUpMode mode, const std::optional<WebhookMatchContex
       const ReadyTally tally = TeamReadyTally(teamRoster[t], teamReady[t], ctx->players_per_team);
       b.ready += tally.ready;
       b.total += tally.total;
+      const int sideIdx = ((t == 0) == team1Ct) ? 0 : 1;
+      b.sideReady[sideIdx] = tally.ready;
+      b.sideTotal[sideIdx] = tally.total;
     }
     b.tallied = true;
     if (DevBotsReadyEnabled()) {
@@ -222,53 +218,38 @@ static Board BuildBoard(ReadyUpMode mode, const std::optional<WebhookMatchContex
     for (const auto& e : b.entries) {
       b.total++;
       if (e.ready) b.ready++;
+      const int sideIdx = e.side == 3 ? 0 : 1;
+      b.sideTotal[sideIdx]++;
+      if (e.ready) b.sideReady[sideIdx]++;
     }
   }
   return b;
 }
 
-// One side's line. Entries are grouped by color (ready, not ready, not
-// connected) so each run costs one <font> tag: keeps 5v5 well under ~1 KB.
+// One side's line: the team count and the players still not ready, connected ones first.
 static std::string SideLine(const Board& b, int side, uint64_t viewer) {
-  std::string s = Font(side == 3 ? kCt : kT, side == 3 ? "<b>CT</b>" : "<b>T</b>");
   std::vector<const Entry*> list;
   for (const auto& e : b.entries) {
-    if (e.side == side) list.push_back(&e);
+    if (e.side == side && !e.ready) list.push_back(&e);
   }
-  auto rank = [](const Entry* e) { return !e->connected ? 2 : (e->ready ? 0 : 1); };
-  std::stable_sort(list.begin(), list.end(), [&](const Entry* x, const Entry* y) { return rank(x) < rank(y); });
+  std::stable_sort(list.begin(), list.end(), [](const Entry* x, const Entry* y) { return x->connected > y->connected; });
 
-  int shown = 0, hidden = 0;
-  const char* runColor = nullptr;
-  std::string run;
-  auto flush = [&]() {
-    if (runColor && !run.empty()) s += "&#160; " + Font(runColor, run);
-    run.clear();
-  };
+  std::vector<std::string> waiting;
+  int hidden = 0;
+  size_t used = 0;
   for (const Entry* e : list) {
-    // Keep the viewer visible even past the cap.
-    if (shown >= kMaxNamesPerSide && e->sid != viewer) {
+    const size_t len = std::min(e->name.size(), kMaxNameBytes) + (waiting.empty() ? 0 : 2);
+    // Keep the viewer visible even past the caps.
+    if ((static_cast<int>(waiting.size()) >= kMaxNamesPerSide || used + len > kMaxWaitingBytes) && e->sid != viewer) {
       hidden++;
       continue;
     }
-    const char* col = !e->connected ? kDim : (e->ready ? kOk : kNo);
-    if (col != runColor) {
-      flush();
-      runColor = col;
-    } else {
-      run += "&#160; ";
-    }
-    run += e->ready ? "&#10004;" : "&#10006;";
+    used += len;
     const std::string nm = Esc(e->name, kMaxNameBytes);
-    run += (e->sid == viewer) ? "<b>" + nm + "</b>" : nm;
-    shown++;
+    waiting.push_back(e->sid == viewer ? "<b>" + nm + "</b>" : nm);
   }
-  flush();
-  if (hidden > 0) s += " " + Font(kGrey, "+" + std::to_string(hidden));
-  const int bots = (side == 3) ? b.botsCt : b.botsT;
-  if (bots > 0) s += " " + Font(kOk, "&#10004;" + std::to_string(bots) + (bots == 1 ? " bot" : " bots"));
-  if (shown == 0 && hidden == 0 && bots == 0) s += " " + Font(kDim, "-");
-  return s;
+  const int idx = side == 3 ? 0 : 1;
+  return ReadyHudTeamLine(side == 3, b.sideReady[idx], b.sideTotal[idx], waiting, hidden, side == 3 ? b.botsCt : b.botsT);
 }
 
 static std::string ReadyHtml(const Board& b, uint64_t viewer, const std::string& footer) {
@@ -281,7 +262,8 @@ static std::string ReadyHtml(const Board& b, uint64_t viewer, const std::string&
   h += "<br>";
   h += Font(b.total > 0 && b.ready == b.total ? kOk : kGold,
             "<b>" + std::to_string(b.ready) + "/" + std::to_string(b.total) + " ready</b>");
-  h += "<br>" + SideLine(b, 3, viewer) + "<br>" + SideLine(b, 2, viewer) + "<br>";
+  h += "<br><font class='fontSize-sm'>" + SideLine(b, 3, viewer) + "</font><br><font class='fontSize-sm'>" +
+       SideLine(b, 2, viewer) + "</font><br>";
 
   const Entry* me = nullptr;
   for (const auto& e : b.entries) {
@@ -290,9 +272,9 @@ static std::string ReadyHtml(const Board& b, uint64_t viewer, const std::string&
   if (!me) {
     h += Font(kGrey, b.scrim ? "join CT or T to play" : "spectating");
   } else if (me->ready) {
-    h += Font(kGrey, "you are ready &#183; <b>.ur</b> to cancel");
+    h += Font(kOk, "you are ready &#183; <b>.ur</b> to cancel");
   } else {
-    h += Font(kGold, "type <b>.r</b> in chat when ready");
+    h += Font(kNo, "type <b>.r</b> in chat when ready");
   }
   if (!b.note.empty()) h += "<br>" + Font(kGrey, b.note);
   if (!footer.empty()) h += "<br>" + footer;

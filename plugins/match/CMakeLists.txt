@@ -217,7 +217,7 @@ target_include_directories(match_idle_refresh_test PRIVATE ${CMAKE_CURRENT_SOURC
 target_compile_options(match_idle_refresh_test PRIVATE -Wall -Wextra)
 add_test(NAME match_idle_refresh COMMAND match_idle_refresh_test)
 
-# Ready panel player names (readyup/ready_hud_logic.h; ctest `match_ready_hud`).
+# Ready panel player names and team lines (readyup/ready_hud_logic.h; ctest `match_ready_hud`).
 add_executable(match_ready_hud_test tests/ready_hud_test.cpp readyup/ready_hud_logic.cpp)
 target_include_directories(match_ready_hud_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_options(match_ready_hud_test PRIVATE -Wall -Wextra)
