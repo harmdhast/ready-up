@@ -1066,6 +1066,13 @@ int BackupRoundFromName(const std::string& fileName) {
   return n;
 }
 
+bool LiveSessionBackup(const std::string& fileName, const std::string& prefix, long long mtimeMs,
+                       long long liveSinceMs) {
+  if (liveSinceMs < 0 || fileName.compare(0, prefix.size(), prefix) != 0) return false;
+  if (fileName.size() < 4 || fileName.compare(fileName.size() - 4, 4, ".txt") != 0) return false;
+  return BackupRoundFromName(fileName) >= 0 && mtimeMs >= liveSinceMs - kLiveBackupSlackMs;
+}
+
 bool SafeBackupFileName(const std::string& name) {
   if (name.size() < 5 || name.size() > 128) return false;
   if (name.compare(name.size() - 4, 4, ".txt") != 0) return false;

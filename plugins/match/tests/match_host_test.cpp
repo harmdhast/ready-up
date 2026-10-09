@@ -824,6 +824,28 @@ int main(int argc, char** argv) {
       rp::Frame(true);
     }
 
+    std::puts("-- round backups are written only while the match is live");
+    for (const char* exitCmd : exits) {
+      ClearCmds();
+      Check(loadMatch(++id), (std::string(exitCmd) + ": match loaded").c_str());
+      Check(Sent("mp_backup_round_auto 0") && !Sent("mp_backup_round_auto 1") &&
+                Sent("mp_backup_round_file readyup_backup_" + std::to_string(id) + "_map1_"),
+            (std::string(exitCmd) + ": match load sets the backup file, backups stay off in warmup").c_str());
+      ClearCmds();
+      rp::TryDispatchRu(true, 0, "Console", "ru match start force");
+      rp::Frame(true);
+      Check(Sent("mp_backup_round_auto 1"), (std::string(exitCmd) + ": the go-live turns backups on").c_str());
+      rp::Frame(true);
+      Check(!Sent("mp_backup_round_auto 0"), (std::string(exitCmd) + ": they stay on while live").c_str());
+      rp::TryDispatchRu(true, 0, "Console", exitCmd);
+      Check(FramesUntil([] { return Sent("mp_backup_round_auto 0"); }, 2000),
+            (std::string(exitCmd) + ": leaving live turns them off").c_str());
+      rp::TryDispatchRu(true, 0, "Console", "ru mode idle");
+      rp::Frame(true);
+      rp::TryDispatchRu(true, 0, "Console", "ru match end");
+      rp::Frame(true);
+    }
+
     // A pause belongs to its match (an admin pause, a failover resume's pause): ending the match
     // while paused must not leave the next match on this server starting as paused.
     std::puts("-- a pause does not outlive its match");

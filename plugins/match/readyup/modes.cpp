@@ -109,6 +109,9 @@ struct State {
   // Track current map so cfg baselines are re-executed on map changes (MatchZy behavior).
   std::string lastSeenMap;
 
+  // The mode was match_live at the last Tick (round backups are turned off when it leaves).
+  bool wasLive = false;
+
 
   // Best-effort warmup rules + transition into live.
   bool warmupRulesApplied = false;
@@ -2371,6 +2374,12 @@ void Tick() {
       }
     }
   }
+
+  // CS2 writes round backups only while the match is live (the go-live turns them on): a warmup,
+  // a knife round or an idle server leaves no backup to restore.
+  const bool live = st.mode == ReadyUpMode::MatchLive;
+  if (st.wasLive && !live) (void)EnqueueServerCommand("mp_backup_round_auto 0");
+  st.wasLive = live;
 
   if (st.mode == ReadyUpMode::Idle) {
     if (st.wingmanGameMode && !WebhookGetMatchContext()) {
