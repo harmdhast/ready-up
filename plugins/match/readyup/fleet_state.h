@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <map>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -250,5 +251,12 @@ ResetOutcome PlanReset(bool assigned, const std::string& asgMatchId, bool localM
                        const std::string& pendingRecoverySlug);
 // cmd.result `result`: {"ended": .., "match_id": ..|null}.
 Json ResetResultJson(const ResetOutcome& o);
+
+// ---------------------------------------------------------------------------- players
+
+// CS2 team number -> state.snapshot players[].team: 1 spectator, 2 t, 3 ct, anything else none.
+const char* CsTeamName(int csTeam);
+// state.snapshot `players`: the connected humans {steamid64, name, team} (steamid 0 left out).
+Json PlayersJson(const std::vector<std::tuple<uint64_t, std::string, int>>& humans);
 
 }  // namespace readyup::fleetstate

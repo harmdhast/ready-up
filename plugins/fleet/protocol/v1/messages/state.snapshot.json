@@ -62,6 +62,38 @@
     },
     "map_stats": {
       "$ref": "../match.defs.json#/$defs/mapStats"
+    },
+    "players": {
+      "type": "array",
+      "maxItems": 64,
+      "description": "The humans connected now (assigned or not): what the platform lists for kick. Absent on older Ready Up.",
+      "items": {
+        "type": "object",
+        "required": [
+          "steamid64",
+          "name",
+          "team"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "steamid64": {
+            "type": "string",
+            "pattern": "^[0-9]{17}$"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "team": {
+            "enum": [
+              "none",
+              "spectator",
+              "t",
+              "ct"
+            ]
+          }
+        }
+      }
     }
   }
 }

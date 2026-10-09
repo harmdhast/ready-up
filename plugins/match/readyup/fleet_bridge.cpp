@@ -172,12 +172,16 @@ bool Send(const std::string& type, const Json& payload, long long epoch, bool re
 bool SendSnapshot(const char* reason, bool withStats) {
   const ru_fleet_v1* f = Fleet();
   if (!FleetActive(f) || !FLEET_HAS(f, send_snapshot)) return false;
-  std::string extra;
+  // Who is connected, assigned or not (the platform lists them for kick).
+  std::vector<std::tuple<uint64_t, std::string, int>> humans;
+  for (const auto& h : ListHumans()) humans.emplace_back(h.steamid64, h.name, h.team);
+  std::string extra = std::string("{\"players\":") + fs::PlayersJson(humans).Dump();
   if (withStats && g_asg.active) {
     std::lock_guard<std::recursive_mutex> lk(stats::Mutex());
-    extra = std::string("{\"map_stats\":") + stats::ToJson(stats::Current().Snapshot()) + "}";
+    extra += std::string(",\"map_stats\":") + stats::ToJson(stats::Current().Snapshot());
   }
-  return f->send_snapshot(reason, extra.empty() ? nullptr : extra.c_str()) == 1;
+  extra += "}";
+  return f->send_snapshot(reason, extra.c_str()) == 1;
 }
 
 // ---------------------------------------------------------------------------- replies

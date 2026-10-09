@@ -1110,4 +1110,30 @@ Json ResetResultJson(const ResetOutcome& o) {
   return p;
 }
 
+const char* CsTeamName(int csTeam) {
+  switch (csTeam) {
+    case 1:
+      return "spectator";
+    case 2:
+      return "t";
+    case 3:
+      return "ct";
+    default:
+      return "none";
+  }
+}
+
+Json PlayersJson(const std::vector<std::tuple<uint64_t, std::string, int>>& humans) {
+  Json out = Json::Array();
+  for (const auto& [sid, name, team] : humans) {
+    if (sid == 0 || out.Items().size() >= 64) continue;
+    Json p = Json::Object();
+    p["steamid64"] = std::to_string(sid);
+    p["name"] = name.substr(0, 128);
+    p["team"] = CsTeamName(team);
+    out.Push(std::move(p));
+  }
+  return out;
+}
+
 }  // namespace readyup::fleetstate

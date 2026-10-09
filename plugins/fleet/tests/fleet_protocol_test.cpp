@@ -110,6 +110,8 @@ int main() {
   CHECK(broken("hello.availability_reason.json", [](Value* p) { p->Set("detail", Value::Str(std::string(129, 'x'))); }));
   CHECK(broken("live.state.snapshot.json", [](Value* p) { p->Set("availability_reason", Value::Int(1)); }));
   CHECK(broken("cmd.result.reset.json", [](Value* p) { p->Set("result", Value::Str("local")); }));
+  CHECK(broken("state.snapshot.players.json", [](Value* p) { p->Get("players")->a.at(0).Set("team", Value::Str("blue")); }));
+  CHECK(broken("state.snapshot.players.json", [](Value* p) { p->Get("players")->a.at(0).Set("steamid64", Value::Str("123")); }));
   CHECK(broken("cmd.result.json", [](Value* p) { p->Set("status", Value::Str("maybe")); }));
   CHECK(broken("state.patch.json", [](Value* p) { p->Set("rev", Value::Int(0)); }));
   CHECK(broken("event.pause.json", [](Value* p) { p->Get("data")->Set("type", Value::Str("coffee")); }));

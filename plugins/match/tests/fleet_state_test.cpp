@@ -906,6 +906,14 @@ static void TestPlanReset() {
   CHECK_STR(fs::ResetResultJson(o).Dump(), R"({"ended":"local","match_id":"cup-final"})");
 }
 
+static void TestPlayersJson() {
+  CHECK_STR(fs::PlayersJson({{76561197960265728ull, "a", 3}, {0, "x", 2}, {76561197960265729ull, "b\"q", 1}}).Dump(),
+            R"([{"steamid64":"76561197960265728","name":"a","team":"ct"},{"steamid64":"76561197960265729","name":"b\"q","team":"spectator"}])");
+  CHECK_STR(fs::CsTeamName(2), "t");
+  CHECK_STR(fs::CsTeamName(0), "none");
+  CHECK_STR(fs::CsTeamName(7), "none");
+}
+
 int main() {
   TestLiveStream();
   TestSubstitutes();
@@ -921,6 +929,7 @@ int main() {
   TestServerConfigPlan();
   TestAvailability();
   TestPlanReset();
+  TestPlayersJson();
   if (g_failures) {
     std::fprintf(stderr, "fleet_state_test: %d of %d checks FAILED\n", g_failures, g_checks);
     return 1;
