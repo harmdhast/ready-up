@@ -74,7 +74,8 @@ const ru_api* g_api = nullptr;
 uint64_t g_fleetInstance = 0;
 std::vector<uint64_t> g_handlerIds;
 double g_lastIdlePublish = -1e9;
-std::string g_lastPublishedAvail;
+fs::AvailabilityInfo g_lastPublishedAvail;  // empty availability = nothing published yet
+bool g_forceAvailNotice = false;            // send server.availability on the next publish (new fleet.so)
 
 // ---- the assignment (game thread) -----------------------------------------------------------
 fs::Assignment g_asg;
@@ -563,26 +564,37 @@ Json BuildState() {
 // server.drain (FLEET.md §14.3): finish the current series, take nothing new, report "draining"
 // until server.undrain. Held in memory only: a restart (the update the drain was for) clears it.
 bool g_draining = false;
+std::string g_drainReason;
 
-std::string Availability() {
-  if (g_draining) return "draining";
-  if (!g_asg.active) return LocalMatchActive() ? "busy" : "available";
-  return g_serverReset ? "available" : "busy";
+fs::AvailabilityInfo CurrentAvailability() {
+  fs::AvailabilityInputs in;
+  in.draining = g_draining;
+  in.drainReason = g_drainReason;
+  in.assigned = g_asg.active;
+  in.serverReset = g_serverReset;
+  in.seriesOver = g_seriesOver;
+  in.matchId = g_asg.match_id;
+  if (!g_asg.active && LocalMatchActive()) {
+    in.localMatch = true;
+    in.localSlug = WebhookGetMatchContext()->slug;
+  }
+  return fs::ComputeAvailability(in);
 }
 
 void PublishState(const Json& st) {
   const ru_fleet_v1* f = Fleet();
   if (!f) return;
-  const std::string avail = Availability();
+  const fs::AvailabilityInfo a = CurrentAvailability();
   const std::string body = st.IsNull() ? std::string("null") : st.Dump();
-  f->publish_state(body.c_str(), avail.c_str());
-  if (avail != g_lastPublishedAvail && !g_lastPublishedAvail.empty() && FleetActive(f)) {
-    Json p = Json::Object();
-    p["availability"] = avail;
-    p["reason"] = avail == "draining" ? "drain" : g_asg.active ? (g_serverReset ? "series_end" : "assigned") : "idle";
-    Send("server.availability", p, 0, true);
+  f->publish_state(body.c_str(), a.availability.c_str());
+  if (FLEET_HAS(f, publish_availability) && f->publish_availability)
+    f->publish_availability(a.availability.c_str(), a.reason.c_str(), a.detail.c_str());
+  const bool changed = !g_lastPublishedAvail.availability.empty() && a != g_lastPublishedAvail;
+  if ((changed || g_forceAvailNotice) && FleetActive(f)) {
+    Send("server.availability", fs::AvailabilityNotice(a), 0, true);
+    g_forceAvailNotice = false;
   }
-  g_lastPublishedAvail = avail;
+  g_lastPublishedAvail = a;
 }
 
 // ---------------------------------------------------------------------------- events
@@ -1634,6 +1646,7 @@ void OnDrain(bool drain, const ru_fleet_msg* m) {
   const std::string reason = Str(p, "reason");
   if (g_draining == drain) return;
   g_draining = drain;
+  g_drainReason = drain ? reason.substr(0, 128) : "";
   Print("fleet: %s%s%s\n", drain ? "server.drain" : "server.undrain", reason.empty() ? "" : ": ", reason.c_str());
   PublishState(g_asg.active && g_stream.HasState() ? g_stream.State() : Json());  // sends server.availability
 }
@@ -1882,10 +1895,13 @@ void EnsureHandlers() {
   f->add_capability("mode.wingman.v1");
   f->add_capability("mode.simulation.v1");
   PublishAdminsRev();
-  g_lastPublishedAvail.clear();
+  // A new fleet.so said hello with its own default (or match_disabled): tell it what is true.
+  g_forceAvailNotice = true;
   if (g_asg.active) {
     PublishState(g_stream.State());
     SendSnapshot("hello", true);
+  } else {
+    PublishState(Json());
   }
 }
 
@@ -1996,7 +2012,7 @@ void Tick(double now) {
     (void)signals::Take();
     if (f && now - g_lastIdlePublish >= 1.0) {
       g_lastIdlePublish = now;
-      if (g_lastPublishedAvail != Availability()) PublishState(Json());
+      if (g_forceAvailNotice || g_lastPublishedAvail != CurrentAvailability()) PublishState(Json());
     }
     // Pending kicks after an unassign still run.
     for (auto it = g_kicks.begin(); it != g_kicks.end();) {
