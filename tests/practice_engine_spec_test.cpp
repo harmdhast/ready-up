@@ -1,4 +1,4 @@
-// ru_api 1.13 rules (core/src/readyup/practice_engine_spec.h): the feature table and the checks
+// ru_api 1.13 / 1.14 rules (core/src/readyup/practice_engine_spec.h): the feature table and the checks
 // that refuse a request before any engine call. The engine functions themselves are checked
 // offline by readyup_sigcheck and on a server by `ru selftest` / compat-report.
 #include "readyup/practice_engine_spec.h"
@@ -33,11 +33,21 @@ int main() {
   Check(ec && std::strcmp(ec->function, "UTIL_CreateEntityByName") == 0 && ec->function2 &&
             std::strcmp(ec->function2, "CBaseEntity_DispatchSpawn") == 0 && !ec->vtable,
         "entity_create = UTIL_CreateEntityByName + DispatchSpawn");
+  const pe::FeatureInfo* rs = pe::Feature("respawn");
+  Check(rs && !rs->function && rs->function2 && std::strcmp(rs->function2, "CBasePlayerController_SetPawn") == 0 &&
+            std::strcmp(rs->vtable, "CCSPlayerController::Respawn") == 0,
+        "respawn = SetPawn + the CCSPlayerController::Respawn slot (anchors only)");
   Check(!pe::Feature("") && !pe::Feature(nullptr) && !pe::Feature("grenade"), "unknown features have no entry");
 
   // Teams: the public RU_TEAM_* values.
   Check(pe::ValidTeam(RU_TEAM_SPECTATOR) && pe::ValidTeam(RU_TEAM_T) && pe::ValidTeam(RU_TEAM_CT), "teams 1..3");
   Check(!pe::ValidTeam(RU_TEAM_UNASSIGNED) && !pe::ValidTeam(4) && !pe::ValidTeam(-1), "other teams refused");
+
+  // Respawn requests: a dead player on T or CT.
+  Check(!pe::ValidateRespawn(RU_TEAM_T, false) && !pe::ValidateRespawn(RU_TEAM_CT, false), "a dead T / CT respawns");
+  Check(pe::ValidateRespawn(RU_TEAM_T, true) != nullptr, "an alive player is refused");
+  Check(pe::ValidateRespawn(RU_TEAM_SPECTATOR, false) && pe::ValidateRespawn(RU_TEAM_UNASSIGNED, false),
+        "spectators / unassigned refused");
 
   // Teleport requests.
   const float pos[3] = {100.f, -2000.f, 64.f}, ang[3] = {-12.5f, 179.f, 0.f}, vel[3] = {0.f, 0.f, 0.f};
@@ -69,6 +79,8 @@ int main() {
             offsetof(ru_api, entity_spawn) > offsetof(ru_api, player_teleport),
         "1.13 members follow 1.12");
   Check(RU_API_VERSION_MINOR(READYUP_PLUGIN_API_VERSION) >= 13, "API minor 13");
+  Check(offsetof(ru_api, player_respawn) > offsetof(ru_api, entity_spawn), "1.14 member follows 1.13");
+  Check(RU_API_VERSION_MINOR(READYUP_PLUGIN_API_VERSION) >= 14, "API minor 14");
 
   std::printf("practice_engine_spec_test: %s\n", g_failed ? "FAIL" : "PASS");
   return g_failed ? 1 : 0;

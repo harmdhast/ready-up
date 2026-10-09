@@ -414,6 +414,16 @@ int ApiEntitySpawn(ru_plugin* self, void* ent) {
   return 0;
 }
 
+// ---- v1.14 --------------------------------------------------------------------------
+
+int ApiPlayerRespawn(ru_plugin* self, int slot) {
+  if (!CheckGameThread(self, "player_respawn")) return 0;
+  std::string why;
+  if (practice_engine::Respawn(slot, &why)) return 1;
+  Print("plugin[%s]: player_respawn(%d) refused: %s\n", detail::PluginNameOf(self), slot, why.c_str());
+  return 0;
+}
+
 }  // namespace
 
 void detail::FillEngineApi(ru_api* a) {
@@ -462,6 +472,7 @@ void detail::FillEngineApi(ru_api* a) {
   a->player_teleport = &ApiPlayerTeleport;
   a->entity_create = &ApiEntityCreate;
   a->entity_spawn = &ApiEntitySpawn;
+  a->player_respawn = &ApiPlayerRespawn;  // v1.14
 }
 
 }  // namespace readyup::plugins
