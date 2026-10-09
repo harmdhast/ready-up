@@ -1623,6 +1623,71 @@ Result CmdReset() {
   return r;
 }
 
+// cmd add_time: the current round runs `seconds` longer. mp_roundtime only reaches the next round,
+// so the time goes on the gamerules' m_iRoundTime (CCSGameRulesProxy -> m_pGameRules), marked
+// changed so clients see it. Offsets come from the schema; -1 = not on this CS2 build.
+int g_rulesPtrOff = -2, g_roundTimeOff = -2;
+uint32_t g_rulesProxy = 0;
+
+bool AddRoundTimeSeconds(int seconds, int* newRoundTime, std::string* why) {
+  if (g_api->entity_system_status(g_api->self) != RU_ENTSYS_OK) {
+    *why = "the entity system is not ready";
+    return false;
+  }
+  if (g_rulesPtrOff == -2) g_rulesPtrOff = g_api->schema_offset(g_api->self, "CCSGameRulesProxy", "m_pGameRules");
+  if (g_roundTimeOff == -2) g_roundTimeOff = g_api->schema_offset(g_api->self, "CCSGameRules", "m_iRoundTime");
+  if (g_rulesPtrOff < 0 || g_roundTimeOff < 0) {
+    *why = "not available on this CS2 build";
+    return false;
+  }
+  auto isProxy = [](void* e) {
+    const char* cls = e ? g_api->entity_classname(g_api->self, e) : nullptr;
+    return cls && std::strcmp(cls, "cs_gamerules") == 0;
+  };
+  void* proxy = g_rulesProxy ? g_api->entity_from_handle(g_api->self, g_rulesProxy) : nullptr;
+  if (!isProxy(proxy)) {
+    proxy = nullptr;
+    for (int i = 0; i < 4096 && !proxy; ++i) {
+      void* e = g_api->entity_by_index(g_api->self, i);
+      if (isProxy(e)) proxy = e;
+    }
+    g_rulesProxy = proxy ? g_api->entity_handle_of(g_api->self, proxy) : 0;
+  }
+  if (!proxy) {
+    *why = "no cs_gamerules entity";
+    return false;
+  }
+  char* rules = *reinterpret_cast<char**>(static_cast<char*>(proxy) + g_rulesPtrOff);
+  if (!rules) {
+    *why = "no game rules";
+    return false;
+  }
+  int* roundTime = reinterpret_cast<int*>(rules + g_roundTimeOff);
+  if (*roundTime + seconds > 3600) {
+    *why = "a round lasts one hour at most";
+    return false;
+  }
+  *roundTime += seconds;
+  g_api->entity_mark_changed(g_api->self, proxy);
+  *newRoundTime = *roundTime;
+  return true;
+}
+
+Result CmdAddTime(const Json& args) {
+  int seconds = 0, total = 0;
+  std::string code, why;
+  if (!fs::ValidateAddTime(args, Str(g_stream.State(), "phase"), MatchFeaturesRoundOver(), MatchFeaturesInFreeze(),
+                           &seconds, &code, &why)) {
+    return Rejected(code, why);
+  }
+  if (!AddRoundTimeSeconds(seconds, &total, &why)) return Failed("engine", why);
+  Print("fleet: add_time +%ds, round time now %ds\n", seconds, total);
+  Result r = Ok();
+  r.output = "round_time=" + std::to_string(total);
+  r.haveOutput = true;
+  return r;
+}
+
 // A JSON scalar as the text a console setting takes (true -> "1").
 bool SettingText(const Json& v, std::string* out) {
   switch (v.type()) {
@@ -1765,7 +1830,7 @@ void OnCmd(const ru_fleet_msg* m) {
   }
   static const std::set<std::string> kMatchCmds = {"pause",      "unpause",   "force_ready", "start",
                                                    "restore_round", "restart_round", "restart_map", "end_match",
-                                                   "end",        "change_map", "swap_teams"};
+                                                   "end",        "change_map", "swap_teams", "add_time"};
   const std::string mid = Str(p, "match_id");
   // reset ends whatever is there: never fenced to one match.
   if (kMatchCmds.count(name) || (!mid.empty() && name != "reset")) {
@@ -1819,6 +1884,8 @@ void OnCmd(const ru_fleet_msg* m) {
     r = CmdSwapTeams();
   } else if (name == "kick") {
     r = CmdKick(args);
+  } else if (name == "add_time") {
+    r = CmdAddTime(args);
   } else if (name == "reset") {
     r = CmdReset();
     Reply(ref, epoch, r, auditId);
@@ -1943,6 +2010,7 @@ void EnsureHandlers() {
   f->add_capability("match.backup.v1");
   f->add_capability("match.resume.v1");
   f->add_capability("cmd.reset.v1");
+  f->add_capability("cmd.add_time.v1");
   f->add_capability("maps.workshop.v1");
   f->add_capability("mode.wingman.v1");
   f->add_capability("mode.simulation.v1");

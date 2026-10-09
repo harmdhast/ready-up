@@ -53,6 +53,8 @@
   "schema_optional": [
     "CBaseEntity.m_hOwnerEntity",
     "CBasePlayerController.m_bIsHLTV",
+    "CCSGameRules.m_iRoundTime",
+    "CCSGameRulesProxy.m_pGameRules",
     "CBasePlayerController.m_iszPlayerName|CCSPlayerController.m_iszPlayerName",
     "CCSPlayerController.m_iCoachingTeam",
     "CCSPlayerController.m_iMVPs",

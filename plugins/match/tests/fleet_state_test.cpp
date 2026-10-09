@@ -914,6 +914,25 @@ static void TestPlayersJson() {
   CHECK_STR(fs::CsTeamName(7), "none");
 }
 
+static void TestValidateAddTime() {
+  int sec = 0;
+  std::string c, w;
+  CHECK(fs::ValidateAddTime(J(R"({"seconds":30})"), "live", false, false, &sec, &c, &w) && sec == 30);
+  CHECK(!fs::ValidateAddTime(J(R"({"seconds":601})"), "live", false, false, &sec, &c, &w));
+  CHECK_STR(c, "bad_args");
+  CHECK(!fs::ValidateAddTime(J(R"({"seconds":0})"), "live", false, false, &sec, &c, &w));
+  CHECK_STR(c, "bad_args");
+  CHECK(!fs::ValidateAddTime(J(R"({"seconds":"30"})"), "live", false, false, &sec, &c, &w));
+  CHECK_STR(c, "bad_args");
+  CHECK(!fs::ValidateAddTime(J(R"({"seconds":30})"), "warmup", false, false, &sec, &c, &w));
+  CHECK_STR(c, "bad_phase");
+  CHECK(!fs::ValidateAddTime(J(R"({"seconds":30})"), "overtime", false, true, &sec, &c, &w));
+  CHECK_STR(c, "bad_phase");
+  CHECK(!fs::ValidateAddTime(J(R"({"seconds":30})"), "live", true, false, &sec, &c, &w));
+  CHECK_STR(c, "bad_phase");
+  CHECK(fs::ValidateAddTime(J(R"({"seconds":600})"), "overtime", false, false, &sec, &c, &w) && sec == 600);
+}
+
 int main() {
   TestLiveStream();
   TestSubstitutes();
@@ -930,6 +949,7 @@ int main() {
   TestAvailability();
   TestPlanReset();
   TestPlayersJson();
+  TestValidateAddTime();
   if (g_failures) {
     std::fprintf(stderr, "fleet_state_test: %d of %d checks FAILED\n", g_failures, g_checks);
     return 1;

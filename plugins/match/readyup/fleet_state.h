@@ -256,6 +256,10 @@ Json ResetResultJson(const ResetOutcome& o);
 
 // CS2 team number -> state.snapshot players[].team: 1 spectator, 2 t, 3 ct, anything else none.
 const char* CsTeamName(int csTeam);
+// cmd add_time {seconds}: an integer 1..600 (bad_args), during a live or overtime round that is
+// past freeze time and not over (bad_phase).
+bool ValidateAddTime(const Json& args, const std::string& phase, bool roundOver, bool inFreeze, int* seconds,
+                     std::string* code, std::string* why);
 // state.snapshot `players`: the connected humans {steamid64, name, team} (steamid 0 left out).
 Json PlayersJson(const std::vector<std::tuple<uint64_t, std::string, int>>& humans);
 

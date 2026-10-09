@@ -1136,4 +1136,26 @@ Json PlayersJson(const std::vector<std::tuple<uint64_t, std::string, int>>& huma
   return out;
 }
 
+bool ValidateAddTime(const Json& args, const std::string& phase, bool roundOver, bool inFreeze, int* seconds,
+                     std::string* code, std::string* why) {
+  const Json* v = args.Find("seconds");
+  if (!v || v->type() != Json::Type::Int || v->AsInt() < 1 || v->AsInt() > 600) {
+    *code = "bad_args";
+    *why = "seconds must be a whole number from 1 to 600";
+    return false;
+  }
+  if (phase != "live" && phase != "overtime") {
+    *code = "bad_phase";
+    *why = "add_time works during a live round only";
+    return false;
+  }
+  if (roundOver || inFreeze) {
+    *code = "bad_phase";
+    *why = "no round in progress";
+    return false;
+  }
+  *seconds = static_cast<int>(v->AsInt());
+  return true;
+}
+
 }  // namespace readyup::fleetstate
