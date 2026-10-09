@@ -234,7 +234,7 @@ void OnEvent(void*, const ru_event* e) {
       // Welcome card trigger (the log-line source comes through MatchObserveLogLine).
       if (e->team == 2 || e->team == 3) {
         WelcomeObserveTeamJoin(e->slot, e->team, e->steamid64, e->name ? e->name : "", WelcomeSource::GameEvent);
-        if (e->steamid64) ModesOnHumanJoinedTeam(e->team);  // spawn the joiner in match warmup
+        if (e->steamid64) ModesOnHumanJoinedTeam(e->slot, e->team);  // spawn the joiner in match warmup
       }
     }
     CoachOnEvent(e);

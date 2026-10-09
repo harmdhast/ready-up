@@ -239,6 +239,18 @@ bool ForceJoinTeamForSlot(int slot, int joinTeam) {
   return a->player_change_team(a->self, slot, team) == 1;
 }
 
+bool RespawnAvailable() {
+  const ru_api* a = host::Api();
+  if (!a || !host::OnGameThread() || !RU_API_HAS(a, player_respawn) || !a->player_respawn) return false;
+  return a->engine_feature_available && a->engine_feature_available(a->self, "respawn") == 1;
+}
+
+bool RespawnSlot(int slot) {
+  const ru_api* a = host::Api();
+  if (!a || !host::OnGameThread() || slot < 0 || !RU_API_HAS(a, player_respawn) || !a->player_respawn) return false;
+  return a->player_respawn(a->self, slot) == 1;
+}
+
 const char* FeatureName(Feature f) {
   switch (f) {
     case Feature::ChatCommands: return "chat_commands";

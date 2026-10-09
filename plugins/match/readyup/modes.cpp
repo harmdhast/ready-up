@@ -465,7 +465,7 @@ static void MaybeForceRosterTeamsLocked(State& st) {
         // Only a move that landed: a refused one is retried every interval and must not restart
         // the warmup round each time.
         for (const auto& x : ListHumans()) {
-          if (x.slot == slot && x.steamid64 == steamid && x.team == join) ModesOnHumanJoinedTeam(join);
+          if (x.slot == slot && x.steamid64 == steamid && x.team == join) ModesOnHumanJoinedTeam(slot, join);
         }
       }
     });
@@ -1195,7 +1195,7 @@ static void ResetPracticeRulesLocked(State& st) {
 
 }  // namespace
 
-void ModesOnHumanJoinedTeam(int team) {
+void ModesOnHumanJoinedTeam(int slot, int team) {
   if (team != 2 && team != 3) return;
   static bool s_pending = false;
   static auto s_last = std::chrono::steady_clock::time_point{};
@@ -1203,6 +1203,22 @@ void ModesOnHumanJoinedTeam(int team) {
     auto& st = St();
     std::lock_guard<std::mutex> lk(st.mu);
     if (st.mode != ReadyUpMode::MatchWarmup) return;
+  }
+  if (slot >= 0 && RespawnAvailable()) {
+    // 0.5 s: the team change has landed; only the joiner respawns (if still dead and on a team).
+    ScheduleOnGameThread(0.5, [slot]() {
+      {
+        auto& st = St();
+        std::lock_guard<std::mutex> lk(st.mu);
+        if (st.mode != ReadyUpMode::MatchWarmup) return;
+      }
+      for (const auto& x : ListHumans()) {
+        if (x.slot != slot || (x.team != 2 && x.team != 3)) continue;
+        if (RespawnSlot(slot)) Debug("modes: respawned slot %d so the joiner spawns\n", slot);
+        return;
+      }
+    });
+    return;
   }
   const auto now = std::chrono::steady_clock::now();
   if (s_pending || (now - s_last) < std::chrono::seconds(4)) return;
