@@ -11,8 +11,8 @@ event (`loc_token` = HTML). Tested in game on CS2 1.41.8.3 with `.ru hud test 1-
   opens and closes.
 - The match plugin sets `CCSGameRules::m_bGameRestart` every tick while no restart is pending
   (`hud_steady=1`, default; workaround by Poggu, as in girlglock/CS2FlashingHtmlHudFix). With it,
-  a panel resent every frame stays steady. `mp_restartgame` still works: the flag is left to the
-  engine while `m_flRestartRoundTime` is after the current round's start.
+  a panel resent every frame stays steady. While a restart is pending (`m_flRestartRoundTime`
+  after the current round's start) the flag is false, and `mp_restartgame` still works.
 - Steady display: resend every frame (`hud_tick_ms=0`, `hud_resend_ms=0`,
   `hud_duration_s=1`, the defaults) with `hud_steady=1`. The welcome card and the go-live card
   use the same every-frame cadence.

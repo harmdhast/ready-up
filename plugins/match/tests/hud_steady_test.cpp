@@ -23,7 +23,7 @@ int main() {
   CHECK(HudSteadyGameRestart(0.0f, 12.5f));
   // A restart that already happened (the round started after it).
   CHECK(HudSteadyGameRestart(30.0f, 31.0f));
-  // A restart still pending (mp_restartgame countdown): left to the engine.
+  // A restart still pending (mp_restartgame countdown).
   CHECK(!HudSteadyGameRestart(45.0f, 31.0f));
   if (g_failures != 0) {
     std::fprintf(stderr, "%d of %d checks failed\n", g_failures, g_checks);
