@@ -1,4 +1,5 @@
 #include "readyup/ready_hud.h"
+#include "readyup/ready_hud_logic.h"
 
 #include "readyup/plugin_api.h"
 
@@ -133,14 +134,19 @@ static std::string Img(const std::string& url, int height) {
   return "<img src='" + url + "' width='" + std::to_string(height) + "' height='" + std::to_string(height) + "'>";
 }
 
-static std::string NameOf(uint64_t sid, const std::unordered_map<uint64_t, std::string>& names) {
-  auto it = names.find(sid);
-  if (it != names.end() && !it->second.empty()) return it->second;
-  for (const auto& p : ListObservedPlayers()) {
-    if (p.steamid64 == sid && !p.name.empty()) return p.name;
+static std::string NameOf(uint64_t sid, const std::unordered_map<uint64_t, std::string>& names,
+                          const std::unordered_map<uint64_t, std::string>* rosterNames = nullptr) {
+  std::string connected, roster, observed;
+  if (auto it = names.find(sid); it != names.end()) connected = it->second;
+  if (rosterNames) {
+    if (auto it = rosterNames->find(sid); it != rosterNames->end()) roster = it->second;
   }
-  const std::string s = std::to_string(static_cast<unsigned long long>(sid));
-  return "#" + s.substr(s.size() > 4 ? s.size() - 4 : 0);
+  if (connected.empty() && roster.empty()) {
+    for (const auto& p : ListObservedPlayers()) {
+      if (p.steamid64 == sid && !p.name.empty()) observed = p.name;
+    }
+  }
+  return ReadyHudDisplayName(sid, connected, roster, observed);
 }
 
 static Board BuildBoard(ReadyUpMode mode, const std::optional<WebhookMatchContext>& ctx,
@@ -189,7 +195,7 @@ static Board BuildBoard(ReadyUpMode mode, const std::optional<WebhookMatchContex
       e.sid = kv.first;
       const bool t1 = (kv.second == WebhookTeam::Team1);
       e.side = (t1 == team1Ct) ? 3 : 2;
-      e.name = NameOf(kv.first, names);
+      e.name = NameOf(kv.first, names, &ctx->roster_names);
       e.ready = IsReady(kv.first);
       e.connected = connected.count(kv.first) != 0;
       ++teamRoster[t1 ? 0 : 1];
