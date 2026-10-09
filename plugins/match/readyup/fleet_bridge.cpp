@@ -1101,6 +1101,7 @@ void ClearAssignment() {
   g_resume = fs::ResumePlan{};
   g_resumeActive = g_resumeSnapshotPending = g_resumeRestored = false;
   g_resumeRestoreAt = g_resumeUnpauseAt = -1;
+  g_deferredRestore = DeferredRestore{};  // a restore queued for the next round must not reach the next match
   g_backupScanAt = -1;
   signals::SetEnabled(false);
   {
@@ -1582,6 +1583,42 @@ Result CmdKick(const Json& args) {
   return Rejected("not_connected", "no connected player " + sid);
 }
 
+// cmd reset: whatever the server holds goes, so it can take the next match. The platform's
+// assignment, a match loaded with `ru match load`, or one startup recovery would restore: the same
+// as `ru match end` plus dropping the assignment. The platform settles its own match from the reply.
+Result CmdReset() {
+  const auto ctx = WebhookGetMatchContext();
+  const bool loaded = ctx && ctx->slug != "scrim";
+  const bool local = loaded && !CtxIsOurs(ctx);
+  std::string pending;
+  if (!loaded) {
+    if (const auto json = persisted_match_state::GetActiveMatchJson()) {
+      std::string err;
+      if (const auto saved = ParseWebhookMatchContextFromJson(*json, &err))
+        pending = saved->slug.empty() ? std::to_string(saved->matchid) : saved->slug;
+    }
+  }
+  const fs::ResetOutcome o = fs::PlanReset(g_asg.active, g_asg.match_id, local, local ? ctx->slug : "", pending);
+  if (local) WebhookEmitSeriesEnd(0, 0, "none", 0);
+  if (loaded) {
+    WebhookClearMatchContext();
+    (void)EndMatchResetServer();  // stops the demo and clears the match in state.json
+  } else if (!pending.empty()) {
+    persisted_match_state::ClearActiveMatch();
+  }
+  match_recovery::Cancel();
+  if (g_asg.active) {
+    SetPassword("");
+    ClearAssignment();
+  }
+  g_deferredRestore = DeferredRestore{};
+  Print("fleet: reset: ended %s%s%s\n", o.ended.c_str(), o.matchId.empty() ? "" : " ", o.matchId.c_str());
+  Result r;
+  r.data = fs::ResetResultJson(o);
+  r.haveData = true;
+  return r;
+}
+
 // A JSON scalar as the text a console setting takes (true -> "1").
 bool SettingText(const Json& v, std::string* out) {
   switch (v.type()) {
@@ -1726,7 +1763,8 @@ void OnCmd(const ru_fleet_msg* m) {
                                                    "restore_round", "restart_round", "restart_map", "end_match",
                                                    "end",        "change_map", "swap_teams"};
   const std::string mid = Str(p, "match_id");
-  if (kMatchCmds.count(name) || !mid.empty()) {
+  // reset ends whatever is there: never fenced to one match.
+  if (kMatchCmds.count(name) || (!mid.empty() && name != "reset")) {
     if (mid.empty()) {
       Reply(ref, epoch, Rejected("bad_request", name + " needs match_id and epoch"), auditId);
       return;
@@ -1777,6 +1815,12 @@ void OnCmd(const ru_fleet_msg* m) {
     r = CmdSwapTeams();
   } else if (name == "kick") {
     r = CmdKick(args);
+  } else if (name == "reset") {
+    r = CmdReset();
+    Reply(ref, epoch, r, auditId);
+    PublishState(Json());  // available again: server.availability
+    (void)SendSnapshot("request", false);
+    return;
   } else if (name == "settings.set") {
     r = CmdSettingsSet(args, by);
   } else if (name == "snapshot_now") {
@@ -1894,6 +1938,7 @@ void EnsureHandlers() {
   f->add_capability("match.v1");
   f->add_capability("match.backup.v1");
   f->add_capability("match.resume.v1");
+  f->add_capability("cmd.reset.v1");
   f->add_capability("maps.workshop.v1");
   f->add_capability("mode.wingman.v1");
   f->add_capability("mode.simulation.v1");

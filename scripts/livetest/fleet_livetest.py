@@ -442,6 +442,17 @@ class Test:
                   f"hello admins_rev {cached}, sent rev {self.admins_rev}, snapshot admins_rev "
                   f"{snapa and snapa['payload'].get('admins_rev')}")
 
+        # ---- cmd reset and exec without an assignment
+        self.phase("idle: cmd reset, exec")
+        res = self.cmd("reset", {}, match=False)
+        self.step("cmd reset on an idle server -> ok, ended none",
+                  self.result_ok(res) and res["payload"].get("result") == {"ended": "none", "match_id": None},
+                  json.dumps(res and res["payload"]))
+        res = self.cmd("exec", {"command": "echo lt-idle-exec"}, match=False, root=True)
+        self.step("cmd exec on an idle server -> ok with its output",
+                  self.result_ok(res) and "lt-idle-exec" in (res["payload"].get("output") or ""),
+                  self.err_code(res) or "ok")
+
         # ---- assign
         self.phase("match.assign")
         cur_map = ""
@@ -656,6 +667,9 @@ class Test:
         self.step("match.unassign -> ok + available", self.result_ok(res) and bool(av), self.err_code(res) or "ok")
         res = self.cmd("pause", {"type": "admin"})
         self.step("cmd after unassign -> stale_epoch", self.err_code(res) == "stale_epoch", self.err_code(res))
+        res = self.cmd("reset", {}, match=False)
+        self.step("cmd reset after unassign -> ended none", self.result_ok(res) and
+                  (res["payload"].get("result") or {}).get("ended") == "none", json.dumps(res and res["payload"]))
         if not a.no_resume:
             src = self.load_backup() if a.resume_backup else bd
             if self.step("round backup for the resume", bool(src), (a.resume_backup or "this run's") +
