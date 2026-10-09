@@ -339,6 +339,9 @@ chat_prefix="<Green>[PUG #1]<Default>"
   the welcome screen is up, hides once the match goes live, and shows the knife
   side-pick prompt after a knife round. `ru_warmup_message_html` text (if set) is
   shown as its last line. Same `LegacyGameEventListener` requirement as the welcome screen.
+- `hud_steady=1` (default): the match plugin sets the game rules' `m_bGameRestart` every
+  tick so center panels do not blink when resent every frame ([HUD.md](HUD.md) "Refresh rules").
+  `hud_steady=0` turns it off.
 - The HUD is the ready-up UI: it stays up from joining until the match goes live, so
   the periodic "type .r" chat reminders are only sent when it cannot be shown. Chat
   still announces state changes (warmup start, countdown, knife winner, LIVE).
