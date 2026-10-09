@@ -42,6 +42,10 @@
       "type": "string",
       "maxLength": 8192
     },
+    "result": {
+      "type": "object",
+      "description": "What the command did, when it says more than ok: reset {ended: assignment|local|none, match_id: string|null}."
+    },
     "audit_id": {
       "type": "string",
       "maxLength": 64
