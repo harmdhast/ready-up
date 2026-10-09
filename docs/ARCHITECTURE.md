@@ -314,7 +314,7 @@ Respawning one player. Same engine module and feature table as 1.13 (`practice_e
 
 | Member | Thread | Purpose |
 |---|---|---|
-| `player_respawn(self, slot)` | game | The dead player in `slot` (bots too) on T / CT respawns on their player pawn: `CBasePlayerController::SetPawn(pawn, true, false, false, false)` then `CCSPlayerController::Respawn`, as CounterStrikeSharp's `Respawn()`. Refused: bad slot, alive, not on T / CT, no pawn. Feature `"respawn"` in `engine_feature_available` |
+| `player_respawn(self, slot)` | game | The dead player in `slot` (bots too) on T / CT respawns on their player pawn: `CBasePlayerController::SetPawn(pawn, true, false, false, false)` then `CCSPlayerController::Respawn`, as CounterStrikeSharp's `Respawn()`. 1 = respawned, 2 = already alive (nothing done), 0 = refused (bad slot, not on T / CT, no pawn) or unavailable. Feature `"respawn"` in `engine_feature_available` |
 
 The entries are the core's (`engine-surface.json`), since match warmup needs them without the
 practice component. `CCSPlayerController::Respawn` [276] is an anchors-only `vtable_indices` entry
@@ -328,7 +328,8 @@ repeat an rtti entry with the same typeinfo name and module (the practice one do
 CS2 1.41.9.0 (`readyup_sigcheck`).
 
 User: match warmup respawns a human who joins T / CT, or whom the roster team lock moved, instead
-of restarting the warmup round (`mp_restartgame 1` stays the fallback without the feature).
+of restarting the warmup round (`mp_restartgame 1` stays the fallback without the feature or when
+it refuses).
 
 ### ABI rules
 

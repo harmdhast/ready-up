@@ -719,8 +719,8 @@ typedef struct ru_api {
    */
   /* Respawns the dead player in `slot` (on T or CT) on their player pawn through
    * CBasePlayerController::SetPawn + CCSPlayerController::Respawn, from the core gamedata (vtable
-   * slot checked). Bots too. 1 = done, 0 = refused (bad slot, alive, not on T / CT, no pawn) or
-   * unavailable (engine_feature_available "respawn"). Game thread. */
+   * slot checked). Bots too. 1 = respawned, 2 = already alive (nothing done), 0 = refused (bad
+   * slot, not on T / CT, no pawn) or unavailable (engine_feature_available "respawn"). Game thread. */
   int (*player_respawn)(ru_plugin* self, int slot);
 
   /* v1.15+: fields are appended here. Check RU_API_HAS() before use. */

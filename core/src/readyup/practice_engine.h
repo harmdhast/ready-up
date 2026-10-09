@@ -11,9 +11,9 @@
 // respawn comes from the core gamedata (gamedata/engine-surface.json), so it needs no fragment:
 //   respawn        CBasePlayerController::SetPawn + CCSPlayerController::Respawn (vtable slot,
 //                  anchors only)
-// Each must match exactly once and pass its anchors; the virtuals must also sit in their vtable
-// slot and the object's vptr must be that vtable. Otherwise the feature is unavailable and nothing
-// is called. Game thread only. The pure request checks are in practice_engine_spec.h.
+// Each function must match exactly once and pass its anchors (a vtable entry without a function,
+// its own anchors); the virtuals must also sit in their vtable slot and the object's vptr must be
+// that vtable. Otherwise the feature is unavailable and nothing is called. Game thread only. The pure request checks are in practice_engine_spec.h.
 
 #include <string>
 
@@ -29,8 +29,9 @@ bool ChangeTeam(int slot, int team, std::string* why);
 // left alone.
 bool Teleport(int slot, const float* origin, const float* angles, const float* velocity, std::string* why);
 
-// The dead player in `slot` (on T or CT) respawns on their player pawn.
-bool Respawn(int slot, std::string* why);
+// The dead player in `slot` (on T or CT) respawns on their player pawn: 1 respawned, 2 already
+// alive (nothing called), 0 refused (*why).
+int Respawn(int slot, std::string* why);
 
 // A new entity of `classname`, not spawned yet (write its fields, then Spawn it).
 void* Create(const char* classname, std::string* why);

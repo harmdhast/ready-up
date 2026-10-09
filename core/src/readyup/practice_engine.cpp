@@ -92,10 +92,10 @@ bool Teleport(int slot, const float* origin, const float* angles, const float* v
   return true;
 }
 
-bool Respawn(int slot, std::string* why) {
+int Respawn(int slot, std::string* why) {
   auto fail = [&](const std::string& w) {
     if (why) *why = w;
-    return false;
+    return 0;
   };
   void* ctrl = Controller(slot);
   if (!ctrl) return fail("slot " + std::to_string(slot) + " is not a player");
@@ -109,12 +109,13 @@ bool Respawn(int slot, std::string* why) {
   if (!pawn) return fail("the player has no pawn");
   const int team = static_cast<const unsigned char*>(ctrl)[*teamOff];
   const bool alive = static_cast<const unsigned char*>(pawn)[*lifeOff] == 0;
-  if (const char* bad = ValidateRespawn(team, alive)) return fail(bad);
+  if (const char* bad = ValidateRespawn(team, false)) return fail(bad);
+  if (alive) return 2;
   const FeatureInfo& f = *Feature("respawn");
   void* setPawn = EngineFunction(f.function2);
   if (!setPawn) return fail("not available on this CS2 build (its gamedata did not verify)");
   void* fn = VerifiedVirtual(f, ctrl, why);
-  if (!fn) return false;
+  if (!fn) return 0;
   // CBasePlayerController::SetPawn(this, pawn, bool, bool, bool, bool) with CounterStrikeSharp's
   // (true, false, false, false): a player who died and watched from the observer pawn owns the
   // player pawn again, then CCSPlayerController::Respawn(this) respawns that current pawn.
@@ -122,7 +123,7 @@ bool Respawn(int slot, std::string* why) {
   reinterpret_cast<SetPawnFn>(setPawn)(ctrl, pawn, true, false, false, false);
   using Fn = void (*)(void*);
   reinterpret_cast<Fn>(fn)(ctrl);
-  return true;
+  return 1;
 }
 
 void* Create(const char* classname, std::string* why) {

@@ -419,7 +419,7 @@ int ApiEntitySpawn(ru_plugin* self, void* ent) {
 int ApiPlayerRespawn(ru_plugin* self, int slot) {
   if (!CheckGameThread(self, "player_respawn")) return 0;
   std::string why;
-  if (practice_engine::Respawn(slot, &why)) return 1;
+  if (const int rc = practice_engine::Respawn(slot, &why)) return rc;
   Print("plugin[%s]: player_respawn(%d) refused: %s\n", detail::PluginNameOf(self), slot, why.c_str());
   return 0;
 }
