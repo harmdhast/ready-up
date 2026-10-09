@@ -137,12 +137,15 @@ Choices made where this document leaves room:
   docs/ADMINS.md "Coaches"); no protocol field beyond the role. The gg-vote rules are carried
   in `MatchState.rules` only.
 - Round backups: CS2 writes `readyup_backup_<matchid>_map<N>__roundNN.txt` to `csgo/readyup/`
-  (NN = rounds played; `InlineBackup.round` = NN + 1, the round it starts). The bridge forwards a
-  file 1.5 s after each round start, again when its content changes (a replayed round after a
-  restore), in 384 KiB parts. `cmd restore_round` loads a local file or an inline one (sha256 and
-  size checked, written next to CS2's own backups), rewinds the stats model
-  (`stats::RewindTo`), the round counters and scores, ignores the draw round end the reload
-  causes, pauses and emits `rounds_voided` + `match_restored`.
+  (NN = rounds played; `InlineBackup.round` = NN + 1, the round it starts), only while the match
+  is live: match load sets the file with `mp_backup_round_auto 0`, the go-live turns it on (and
+  a recovered live map from its recovery gate) and leaving match_live turns it off. The bridge forwards a file 1.5 s after each round start, again
+  when its content changes (a replayed round after a restore), in 384 KiB parts. It forwards only
+  while live and only the files written since the match went live: older ones (a warmup, before
+  a server restart) stay local for crash recovery and `restore_round`. `cmd restore_round` loads
+  a local file or an inline one (sha256 and size checked, written next to CS2's own backups),
+  rewinds the stats model (`stats::RewindTo`), the round counters and scores, ignores the draw
+  round end the reload causes, pauses and emits `rounds_voided` + `match_restored`.
 - `exec` output is the console log lines seen in the 0.5 s after the command (best effort).
 - Fixed on the way: with engine events live, the round counter now restarts on `Match_Start`
   (it used to continue from the previous match on the same map).
