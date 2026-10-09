@@ -127,7 +127,8 @@ std::optional<EngineSurface> ParseEngineSurface(const std::string& json, std::st
 
 // Appends a fragment (e.g. gamedata/engine-surface.skins.json) to `base`. A fragment may only
 // add entries: a function, vtable, rtti class or layout that `base` already has is an error
-// (nothing is merged then). Fragment vtables/layouts may refer to base rtti and functions.
+// (nothing is merged then), except an rtti class with the same typeinfo name and module, which
+// both share. Fragment vtables/layouts may refer to base rtti and functions.
 bool MergeEngineSurface(EngineSurface* base, const EngineSurface& fragment, std::string* err);
 
 struct Resolution {
