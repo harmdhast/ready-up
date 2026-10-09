@@ -254,10 +254,10 @@ static std::string ReadyHtml(const Board& b, uint64_t viewer, const std::string&
   return h;
 }
 
-static std::string KnifeHtml(const KnifeHudInfo& k, int viewerSide) {
+static std::string KnifeHtml(const KnifeHudInfo& k, int viewerSide, const std::string& brand) {
   std::string h;
   h.reserve(384);
-  h += Font(kGold, "<b>KNIFE ROUND</b>") + "<br>";
+  h += HudHeader(brand, kGold, "KNIFE ROUND") + "<br>";
   if (k.phase == KnifePhase::Starting) {
     h += "knives only &#183; the winning team picks its side";
     return h;
@@ -278,21 +278,27 @@ static std::string KnifeHtml(const KnifeHudInfo& k, int viewerSide) {
 
 // Live map: pause state + countdowns, and the team-left forfeit countdown. No images (resent
 // every frame, docs/HUD.md). Empty when there is nothing to show.
-static std::string LiveHtml(const LiveHudInfo& l) {
+static std::string LiveHtml(const LiveHudInfo& l, const std::string& brand) {
   std::string h;
   if (l.paused) {
     if (l.type == "tactical") {
-      h += Font(kGold, "<b>TACTICAL TIMEOUT</b>");
+      h += HudHeader(brand, kGold, "TACTICAL TIMEOUT");
       if (!l.byTeam.empty()) h += "<br>" + HudEscape(l.byTeam, 24);
     } else if (l.type == "technical") {
-      h += Font(kNo, "<b>TECHNICAL PAUSE</b>");
-      if (!l.byTeam.empty()) h += " " + Font(kGrey, "by " + HudEscape(l.byTeam, 24));
+      h += HudHeader(brand, kNo, "TECHNICAL PAUSE");
+      // "by Navi · auto-unpause in 4:32" under the header.
+      std::string sub;
+      if (!l.byTeam.empty()) sub += Font(kGrey, "by " + HudEscape(l.byTeam, 24));
+      std::string when;
       if (l.pendingFreeze) {
-        h += "<br>" + Font(kGrey, "pausing at freeze time");
+        when = Font(kGrey, "pausing at freeze time");
       } else if (l.secondsLeft >= 0) {
-        h += "<br>auto-unpause in <b>" + std::to_string(l.secondsLeft / 60) + ":" +
-             (l.secondsLeft % 60 < 10 ? "0" : "") + std::to_string(l.secondsLeft % 60) + "</b>";
+        when = "auto-unpause in <b>" + std::to_string(l.secondsLeft / 60) + ":" +
+               (l.secondsLeft % 60 < 10 ? "0" : "") + std::to_string(l.secondsLeft % 60) + "</b>";
       }
+      if (!sub.empty() && !when.empty()) sub += " " + Font(kGrey, "&#183;") + " ";
+      sub += when;
+      if (!sub.empty()) h += "<br>" + sub;
       auto mark = [&](bool ok, const std::string& n) { return Font(ok ? kOk : kDim, (ok ? "&#10004; " : "&#10006; ") + HudEscape(n, 16)); };
       h += "<br>" + Font(kGrey, l.bothRequired ? "both teams: " : "pausing team: ") + "<b>.unpause</b><br>" +
            mark(l.team1Confirmed, l.team1) + " &#183; " + mark(l.team2Confirmed, l.team2);
@@ -300,23 +306,25 @@ static std::string LiveHtml(const LiveHudInfo& l) {
       // Pauses that belong to nobody (an engine pause, or a round restore): both teams resume
       // them (match_features.h).
       if (l.type == "halftime") {
-        h += Font(kGold, "<b>HALFTIME PAUSE</b>");
+        h += HudHeader(brand, kGold, "HALFTIME PAUSE");
       } else if (l.type == "restore") {
-        h += Font(kGold, "<b>ROUND RESTORED</b>");
+        h += HudHeader(brand, kGold, "ROUND RESTORED");
       } else {
-        h += Font(kNo, "<b>NOT 5v5 - PAUSED</b>");
+        h += HudHeader(brand, kNo, "NOT 5v5 - PAUSED");
         if (!l.byTeam.empty()) h += "<br>" + Font(kGrey, HudEscape(l.byTeam, 24) + " is short");
       }
       auto mark = [&](bool ok, const std::string& n) { return Font(ok ? kOk : kDim, (ok ? "&#10004; " : "&#10006; ") + HudEscape(n, 16)); };
       h += "<br>" + Font(kGrey, "both teams: ") + "<b>.unpause</b><br>" + mark(l.team1Confirmed, l.team1) +
            " &#183; " + mark(l.team2Confirmed, l.team2);
     } else {
-      h += Font(kNo, "<b>PAUSED BY ADMIN</b>") + "<br>" + Font(kGrey, "an admin unpauses (.fup)");
+      h += HudHeader(brand, kNo, "PAUSED BY ADMIN") + "<br>" + Font(kGrey, "an admin unpauses (.fup)");
     }
   }
   if (l.forfeit) {
-    if (!h.empty()) h += "<br>";
-    h += Font(kNo, "<b>" + HudEscape(l.forfeitTeam, 24) + " LEFT</b>") + "<br>forfeit in <b>" +
+    // A pause owns the header; the forfeit then stays a red line below it.
+    const std::string left = HudEscape(l.forfeitTeam, 24) + " LEFT";
+    h += h.empty() ? HudHeader(brand, kNo, left) : "<br>" + Font(kNo, "<b>" + left + "</b>");
+    h += "<br>forfeit in <b>" +
          std::to_string(l.forfeitSecondsLeft / 60) + ":" + (l.forfeitSecondsLeft % 60 < 10 ? "0" : "") +
          std::to_string(l.forfeitSecondsLeft % 60) + "</b> unless a player reconnects";
   }
@@ -590,7 +598,7 @@ void ReadyHudTick() {
       if (holding) knife.phase = KnifePhase::Starting;  // same "knives only" text while held
     }
   } else if (mode == ReadyUpMode::MatchLive) {
-    liveHtml = LiveHtml(MatchFeaturesHud());
+    liveHtml = LiveHtml(MatchFeaturesHud(), HudBrandText());
     if (!liveHtml.empty()) what = What::Live;
   }
   if (what == What::None && tests.empty()) {
@@ -599,6 +607,7 @@ void ReadyHudTick() {
   }
 
   const auto humans = ListHumans();
+  const std::string brand = HudBrandText();
   Board board;
   std::string footer;
   if (what == What::Ready) {
@@ -628,7 +637,7 @@ void ReadyHudTick() {
       if (AdminCallCardActiveFor(slot)) continue;      // an `.admin` call card (admin_call.h)
       html = (what == What::Ready)   ? ReadyHtml(board, h.steamid64, footer)
              : (what == What::Live) ? liveHtml
-                                    : KnifeHtml(knife, h.team);
+                                    : KnifeHtml(knife, h.team, brand);
     }
     if (html.empty()) continue;
 
