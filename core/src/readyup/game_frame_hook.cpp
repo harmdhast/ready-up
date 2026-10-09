@@ -2,6 +2,7 @@
 
 #include "readyup/entity.h"
 
+#include "readyup/command_buffer_hook.h"
 #include "readyup/config.h"
 #include "readyup/engine_surface.h"
 #include "readyup/features.h"
@@ -55,6 +56,13 @@ static void Hook_GameFrame(void* thisptr, bool simulating, bool bFirstTick, bool
   // Our logic is best-effort. Every feature below gates itself on its engine-surface
   // dependencies (features.cpp; one log line when one is disabled).
   const bool plugins = FeatureEnabled(Feature::Plugins);
+  // Ready Up reads chat, rounds and the knife winner from the game log: turn it on once (it
+  // survives map changes), retried until the command buffer accepts the command.
+  static std::atomic<bool> s_logOn{false};
+  if (!s_logOn.load(std::memory_order_relaxed) && CommandBufferSeen() && EnqueueServerCommand("log on")) {
+    s_logOn.store(true, std::memory_order_relaxed);
+    PrintLine("logging: log on (Ready Up reads chat, rounds and the knife winner from the game log)");
+  }
   if (!simulating) {
     // Plugin load/unload + queued commands/events still run while not simulating.
     if (plugins) readyup::plugins::Frame(/*simulating=*/false);
