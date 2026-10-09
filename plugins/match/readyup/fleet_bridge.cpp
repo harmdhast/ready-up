@@ -2056,6 +2056,18 @@ void Tick(double now) {
   RunDeferredRestore();
   const ru_fleet_v1* f = Fleet();
   CheckCs2Update(now, FleetActive(f));
+  // exec answers with its captured output, assigned or not.
+  for (auto it = g_execs.begin(); it != g_execs.end();) {
+    if (now < it->until) {
+      ++it;
+      continue;
+    }
+    Result r = Ok();
+    r.output = it->output;
+    r.haveOutput = true;
+    Reply(it->ref, it->epoch, r, it->auditId);
+    it = g_execs.erase(it);
+  }
   if (!g_asg.active) {
     (void)signals::Take();
     if (f && now - g_lastIdlePublish >= 1.0) {
@@ -2080,17 +2092,6 @@ void Tick(double now) {
     BeginLoad();
   }
   CheckLoaded();
-  for (auto it = g_execs.begin(); it != g_execs.end();) {
-    if (now < it->until) {
-      ++it;
-      continue;
-    }
-    Result r = Ok();
-    r.output = it->output;
-    r.haveOutput = true;
-    Reply(it->ref, it->epoch, r, it->auditId);
-    it = g_execs.erase(it);
-  }
   if (g_backupScanAt >= 0 && now >= g_backupScanAt) {
     g_backupScanAt = -1;
     RunBackupScan();
