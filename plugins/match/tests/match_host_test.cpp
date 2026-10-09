@@ -687,6 +687,35 @@ int main(int argc, char** argv) {
   Check(!FramesUntil([&] { return respawned(3); }, 2000), "a joiner no longer on T / CT is not respawned");
   g_refuseTeamChange = false;
 
+  std::puts("-- team lock + the engine's player_team for the same move: one respawn");
+  ClearLog();
+  g_respawned.clear();
+  g_players.back().team = 0;
+  Check(FramesUntil([] { return Logged("ready: moved bob to T"); }, 6000), "bob is moved");
+  {
+    rp::LifecycleEvent ev;
+    ev.type = RU_EVENT_PLAYER_TEAM;
+    ev.source = RU_SOURCE_ENGINE;
+    ev.slot = 3;
+    ev.steamid64 = 76561198000000002ull;
+    ev.name = "bob";
+    ev.team = 2;
+    rp::PostEvent(ev);
+  }
+  (void)FramesUntil([] { return false; }, 1500);
+  Check(std::count(g_respawned.begin(), g_respawned.end(), 3) == 1, "the move and its player_team event respawn bob once");
+
+  std::puts("-- another player in the joiner's slot before the respawn is left alone");
+  ClearLog();
+  g_respawned.clear();
+  g_players.back().team = 0;
+  Check(FramesUntil([] { return Logged("ready: moved bob to T"); }, 6000), "bob is moved again");
+  g_players.back().steamid64 = 76561198000000009ull;  // bob left, someone else got slot 3 (on T)
+  g_refuseTeamChange = true;
+  Check(!FramesUntil([&] { return respawned(3); }, 2000), "a different player in the slot is not respawned");
+  g_players.back().steamid64 = 76561198000000002ull;
+  g_refuseTeamChange = false;
+
   std::puts("-- team lock: an already alive player is left alone, a refused respawn restarts the round");
   ClearLog();
   ClearCmds();

@@ -90,7 +90,7 @@ void ModesOnEngineGameOver(int ctScore, int tScore);
 // respawned alone (ru_api 1.14 player_respawn). Without it, or when it is refused, the warmup round
 // is restarted so everyone spawns (debounced). Only in the match warmup itself: nothing once going
 // live was triggered or in a recovered live map's gate. Game thread.
-void ModesOnHumanJoinedTeam(int slot, int team);
+void ModesOnHumanJoinedTeam(int slot, uint64_t steamid, int team);
 
 // Map/series end (match_end.cpp, game thread, outside the modes mutex):
 // - ModesBeginNextMapWarmup: postgame -> match warmup for the next map of the series.
