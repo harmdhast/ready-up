@@ -238,4 +238,17 @@ AvailabilityInfo ComputeAvailability(const AvailabilityInputs& in);
 // {availability, reason: reason or legacyReason, detail|null}: the server.availability payload.
 Json AvailabilityNotice(const AvailabilityInfo& a);
 
+// ---------------------------------------------------------------------------- cmd reset
+
+// What `cmd reset` ends: the platform's assignment, else a match loaded on the server itself (or
+// one startup recovery is about to restore), else nothing. matchId "" = null.
+struct ResetOutcome {
+  std::string ended;  // assignment | local | none
+  std::string matchId;
+};
+ResetOutcome PlanReset(bool assigned, const std::string& asgMatchId, bool localMatch, const std::string& localSlug,
+                       const std::string& pendingRecoverySlug);
+// cmd.result `result`: {"ended": .., "match_id": ..|null}.
+Json ResetResultJson(const ResetOutcome& o);
+
 }  // namespace readyup::fleetstate

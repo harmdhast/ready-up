@@ -189,6 +189,8 @@ struct Result {
   std::string output;
   bool haveOutput = false;
   bool deferred = false;  // exec: the reply comes after the output capture
+  Json data;              // cmd.result `result` (reset: what it ended)
+  bool haveData = false;
 };
 
 Result Ok() { return Result{}; }
@@ -216,6 +218,7 @@ void Reply(const std::string& ref, long long epoch, const Result& r, const std::
   }
   if (r.rev >= 0) p["rev"] = r.rev;
   if (r.haveOutput) p["output"] = r.output;
+  if (r.haveData) p["result"] = r.data;
   if (!auditId.empty()) p["audit_id"] = auditId;
   Send("cmd.result", p, epoch > 0 ? epoch : 0, true, ref);
 }

@@ -1095,4 +1095,19 @@ Json AvailabilityNotice(const AvailabilityInfo& a) {
   return p;
 }
 
+ResetOutcome PlanReset(bool assigned, const std::string& asgMatchId, bool localMatch, const std::string& localSlug,
+                       const std::string& pendingRecoverySlug) {
+  if (assigned) return {"assignment", asgMatchId};
+  if (localMatch) return {"local", localSlug};
+  if (!pendingRecoverySlug.empty()) return {"local", pendingRecoverySlug};
+  return {"none", ""};
+}
+
+Json ResetResultJson(const ResetOutcome& o) {
+  Json p = Json::Object();
+  p["ended"] = o.ended;
+  p["match_id"] = o.matchId.empty() ? Json() : Json(o.matchId);
+  return p;
+}
+
 }  // namespace readyup::fleetstate
