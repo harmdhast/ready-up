@@ -39,4 +39,11 @@ std::string ReadyHudDisplayName(uint64_t steamid64, const std::string& connected
 std::string ReadyHudTeamLine(bool ct, const std::string& label, int ready, int total, const std::vector<std::string>& waiting, int hidden,
                              int bots);
 
+// The viewer's own line: Absent (not on the roster or a side), NotReady, Ready.
+enum class ReadyViewer { Absent, NotReady, Ready };
+std::string ReadyHudViewerLine(ReadyViewer v, bool scrim);
+
+// A team line label: the escaped team name (16 bytes), or CT / T when the name is empty.
+std::string ReadyHudTeamLabel(bool ct, const std::string& teamName);
+
 }  // namespace readyup

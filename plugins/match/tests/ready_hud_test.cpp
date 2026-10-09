@@ -72,12 +72,28 @@ static void TestEscape() {
         "\xC3\xA9\xC3\xA9\xC3\xA9\xC3\xA9\xC3\xA9\xC3\xA9\xC3\xA9\xC3\xA9..");
 }
 
+static void TestViewerLine() {
+  CHECK(ReadyHudViewerLine(ReadyViewer::NotReady, false) == "<font color='#F87171'>type <b>.r</b> to ready up</font>");
+  CHECK(ReadyHudViewerLine(ReadyViewer::Ready, true) == "<font color='#7CD35A'><b>READY</b> &#183; .ur to cancel</font>");
+  CHECK(Has(ReadyHudViewerLine(ReadyViewer::Absent, false), "spectating"));
+  CHECK(Has(ReadyHudViewerLine(ReadyViewer::Absent, true), "join CT or T to play"));
+}
+
+static void TestTeamLabel() {
+  CHECK(ReadyHudTeamLabel(true, "") == "CT");
+  CHECK(ReadyHudTeamLabel(false, "") == "T");
+  CHECK(ReadyHudTeamLabel(true, "<Navi>") == "&lt;Navi&gt;");
+  CHECK(ReadyHudTeamLabel(true, "Twelve Monkeys Esports") == "Twelve Monkeys E..");
+}
+
 int main() {
   TestDisplayName();
   TestTeamLine();
   TestHeader();
   TestCountLine();
   TestEscape();
+  TestViewerLine();
+  TestTeamLabel();
   if (g_failures != 0) {
     std::fprintf(stderr, "%d of %d checks failed\n", g_failures, g_checks);
     return 1;

@@ -51,8 +51,9 @@ struct Entry {
 };
 
 struct Board {
-  std::string title;      // e.g. "scrim warmup"
-  std::string countdown;  // e.g. "knife in 3" (empty when none)
+  std::string status = "WARMUP";  // header status: WARMUP / SCRIM / RECOVERY, or the countdown
+  const char* statusColor = kGold;
+  std::string label[2] = {"CT", "T"};  // team line labels: [0] CT, [1] T (escaped HTML)
   std::vector<Entry> entries;
   int botsCt = 0;
   int botsT = 0;
@@ -125,7 +126,7 @@ static Board BuildBoard(ReadyUpMode mode, const std::optional<WebhookMatchContex
 
   if (mode == ReadyUpMode::ScrimWarmup || !ctx) {
     b.scrim = true;
-    b.title = "scrim warmup";
+    b.status = "SCRIM";
     const auto roster = BuildScrimRoster();
     for (const auto& kv : roster.teamNum) {
       Entry e;
@@ -143,10 +144,13 @@ static Board BuildBoard(ReadyUpMode mode, const std::optional<WebhookMatchContex
       b.note = DevBotsReadyEnabled() ? "need players (or bots) on both CT and T" : "need players on both CT and T";
     }
     const int cd = ScrimCountdownSecondsLeft();
-    if (cd >= 0) b.countdown = std::string(settings::Bool("knife_enabled_default") ? "knife in " : "live in ") + std::to_string(cd);
+    if (cd >= 0) {
+      b.status = std::string(settings::Bool("knife_enabled_default") ? "KNIFE IN " : "LIVE IN ") + std::to_string(cd);
+      b.statusColor = kOk;
+    }
   } else {
     b.scrim = (ctx->slug == "scrim");
-    b.title = RecoveryGateEnabled() ? "recovered match" : (b.scrim ? "scrim" : "match warmup");
+    b.status = RecoveryGateEnabled() ? "RECOVERY" : (b.scrim ? "SCRIM" : "WARMUP");
     const auto ms = MatchStateGet();
     const int mapNum = ms.map_number <= 0 ? 1 : ms.map_number;
     bool team1Ct = true;
@@ -154,6 +158,8 @@ static Board BuildBoard(ReadyUpMode mode, const std::optional<WebhookMatchContex
         ctx->map_sides[static_cast<size_t>(mapNum - 1)] == "team2_ct") {
       team1Ct = false;
     }
+    b.label[0] = ReadyHudTeamLabel(true, team1Ct ? ctx->team1_name : ctx->team2_name);
+    b.label[1] = ReadyHudTeamLabel(false, team1Ct ? ctx->team2_name : ctx->team1_name);
     std::unordered_set<uint64_t> connected;
     for (const auto& h : humans) connected.insert(h.steamid64);
     int teamRoster[2] = {0, 0}, teamReady[2] = {0, 0};
@@ -224,33 +230,25 @@ static std::string SideLine(const Board& b, int side, uint64_t viewer) {
     waiting.push_back(e->sid == viewer ? "<b>" + nm + "</b>" : nm);
   }
   const int idx = side == 3 ? 0 : 1;
-  return ReadyHudTeamLine(side == 3, side == 3 ? "CT" : "T", b.sideReady[idx], b.sideTotal[idx], waiting, hidden, side == 3 ? b.botsCt : b.botsT);
+  return ReadyHudTeamLine(side == 3, b.label[idx], b.sideReady[idx], b.sideTotal[idx], waiting, hidden, side == 3 ? b.botsCt : b.botsT);
 }
+
+// Panels resent every frame use the brand text only (an image blinks, docs/HUD.md).
+static std::string HudBrandText() { return FeatureEnabled(Feature::HudBrand) ? Cfg().hud_brand : std::string(); }
 
 static std::string ReadyHtml(const Board& b, uint64_t viewer, const std::string& footer) {
   std::string h;
   h.reserve(768);
-  const std::string brand = HudBrandHtml(/*imgHeight=*/20, "");
-  if (!brand.empty()) h += brand + " " + Font(kGrey, "&#183; " + b.title);
-  else h += Font(kGrey, b.title);
-  if (!b.countdown.empty()) h += " " + Font(kGold, "&#183; <b>" + b.countdown + "</b>");
-  h += "<br>";
-  h += Font(b.total > 0 && b.ready == b.total ? kOk : kGold,
-            "<b>" + std::to_string(b.ready) + "/" + std::to_string(b.total) + " ready</b>");
-  h += "<br><font class='fontSize-sm'>" + SideLine(b, 3, viewer) + "</font><br><font class='fontSize-sm'>" +
+  h += HudHeader(HudBrandText(), b.statusColor, b.status) + "<br>";
+  h += ReadyHudCountLine(b.ready, b.total) + "<br>";
+  h += "<font class='fontSize-sm'>" + SideLine(b, 3, viewer) + "</font><br><font class='fontSize-sm'>" +
        SideLine(b, 2, viewer) + "</font><br>";
 
-  const Entry* me = nullptr;
+  ReadyViewer me = ReadyViewer::Absent;
   for (const auto& e : b.entries) {
-    if (e.sid == viewer) me = &e;
+    if (e.sid == viewer) me = e.ready ? ReadyViewer::Ready : ReadyViewer::NotReady;
   }
-  if (!me) {
-    h += Font(kGrey, b.scrim ? "join CT or T to play" : "spectating");
-  } else if (me->ready) {
-    h += Font(kOk, "you are ready &#183; <b>.ur</b> to cancel");
-  } else {
-    h += Font(kNo, "type <b>.r</b> in chat when ready");
-  }
+  h += ReadyHudViewerLine(me, b.scrim);
   if (!b.note.empty()) h += "<br>" + Font(kGrey, b.note);
   if (!footer.empty()) h += "<br>" + footer;
   return h;

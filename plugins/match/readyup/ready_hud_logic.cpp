@@ -75,4 +75,18 @@ std::string ReadyHudTeamLine(bool ct, const std::string& label, int ready, int t
   return s;
 }
 
+std::string ReadyHudViewerLine(ReadyViewer v, bool scrim) {
+  switch (v) {
+    case ReadyViewer::NotReady: return HudFont(kNo, "type <b>.r</b> to ready up");
+    case ReadyViewer::Ready: return HudFont(kOk, "<b>READY</b> &#183; .ur to cancel");
+    case ReadyViewer::Absent: break;
+  }
+  return HudFont(kGrey, scrim ? "join CT or T to play" : "spectating");
+}
+
+std::string ReadyHudTeamLabel(bool ct, const std::string& teamName) {
+  if (teamName.empty()) return ct ? "CT" : "T";
+  return HudEscape(teamName, 16);
+}
+
 }  // namespace readyup
