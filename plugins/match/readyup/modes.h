@@ -85,6 +85,11 @@ void OnMatchRoundEnded(int map_number, int team1_score, int team2_score, const s
 // round limit differs from the server's), the map ends here with the engine's score.
 void ModesOnEngineGameOver(int ctScore, int tScore);
 
+// The engine logged `Started map` for the map it is already on (match_log.cpp; a new map name goes
+// through the map change): CS2 ran the gamemode cfg again, so the next Tick re-applies the cfg
+// baselines and the warmup rules over it.
+void ModesOnMapLoaded();
+
 // A human joined CT or T (engine player_team). In match warmup the round is one long round, so a
 // player who joins (or is moved by the team lock) mid-round stays dead until it ends; the warmup
 // round is restarted shortly after so everyone spawns. Debounced. Game thread.

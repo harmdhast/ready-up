@@ -108,6 +108,8 @@ struct State {
 
   // Track current map so cfg baselines are re-executed on map changes (MatchZy behavior).
   std::string lastSeenMap;
+  // A map load was logged (ModesOnMapLoaded): also a reload of lastSeenMap.
+  bool mapLoaded = false;
 
 
   // Best-effort warmup rules + transition into live.
@@ -1214,6 +1216,12 @@ void ModesOnHumanJoinedTeam(int team) {
     (void)EnqueueServerCommand("mp_restartgame 1");
     DebugLine("modes: warmup round restarted so a joining player spawns");
   });
+}
+
+void ModesOnMapLoaded() {
+  auto& st = St();
+  std::lock_guard<std::mutex> lk(st.mu);
+  st.mapLoaded = true;
 }
 
 void ModesOnEngineGameOver(int ctScore, int tScore) {
@@ -2341,11 +2349,13 @@ void Tick() {
   const bool scrimAuto = ScrimAutoEnabled();  // before st.mu (scrim_flow has its own lock)
   std::unique_lock<std::mutex> lk(st.mu);
 
-  // MatchZy behavior: treat map changes as a fresh baseline and re-exec cfgs once.
+  // MatchZy behavior: treat every map load as a fresh baseline and re-exec cfgs once. A changelevel
+  // to the same map counts too: CS2's gamemode cfg overwrote the warmup cvars again.
   {
     const auto ms = MatchStateGet();
-    if (!ms.current_map.empty() && ms.current_map != st.lastSeenMap) {
+    if (!ms.current_map.empty() && (ms.current_map != st.lastSeenMap || st.mapLoaded)) {
       st.lastSeenMap = ms.current_map;
+      st.mapLoaded = false;
       // Force re-application of cfg-driven baselines on the new map.
       st.idleCfgExecuted = false;
       st.idleIgnoreWinSent = -1;
@@ -2367,7 +2377,7 @@ void Tick() {
         PrintLine("knife: map changed during the knife round; back to match_warmup.");
       }
       if (DebugEnabled()) {
-        Debug("modes: map changed -> will reapply cfg baselines (map=%s)\n", st.lastSeenMap.c_str());
+        Debug("modes: map loaded -> will reapply cfg baselines (map=%s)\n", st.lastSeenMap.c_str());
       }
     }
   }

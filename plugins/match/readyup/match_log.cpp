@@ -35,6 +35,8 @@ int g_roundNumber = 0;
 int g_team1Score = 0;  // best-effort: CT -> team1, T -> team2 (log notices are CT/T based)
 int g_team2Score = 0;
 std::string g_currentMap;
+// The last `Loading map` changed the map name: its `Started map` is the same load.
+bool g_loadingChangedMap = false;
 
 struct KD {
   std::string name;
@@ -164,9 +166,17 @@ void LifecycleLocked(const std::string& line) {
 
   if (!isChat && (line.find("Loading map \"") != std::string::npos || line.find("Started map \"") != std::string::npos)) {
     std::string map;
-    // "Loading map" and "Started map" of one load are one change, whichever form they use.
-    if (ExtractBetween(line, "map \"", "\"", map) && !map.empty() && mapnames::LoadedBaseName(map) != g_currentMap) {
-      MapChanged(map);
+    // "Loading map" and "Started map" of one load are one change, whichever form they use. A
+    // "Started map" of the map already on is a reload of it (the gamemode cfg ran again).
+    const bool started = line.find("Started map \"") != std::string::npos;
+    if (ExtractBetween(line, "map \"", "\"", map) && !map.empty()) {
+      if (mapnames::LoadedBaseName(map) != g_currentMap) {
+        MapChanged(map);
+        g_loadingChangedMap = !started;
+      } else if (started) {
+        if (!g_loadingChangedMap) ModesOnMapLoaded();
+        g_loadingChangedMap = false;
+      }
     }
   }
 
