@@ -853,6 +853,55 @@ static void TestSubstitutes() {
   CHECK(mat->players_per_team == 2);
 }
 
+static Json BackupPart(const std::string& whole, int part, int parts, size_t partRaw) {
+  const std::string raw = whole.substr(static_cast<size_t>(part - 1) * partRaw, partRaw);
+  Json b = Json::Object();
+  b["map_number"] = 1;
+  b["round"] = 5;
+  b["file"] = "backup_round04.txt";
+  b["size"] = static_cast<long long>(whole.size());
+  b["sha256"] = fs::Sha256Hex(whole);
+  b["score"] = J(R"({"team1":2,"team2":2})");
+  b["encoding"] = "base64";
+  b["data"] = fs::Base64Encode(raw);
+  b["part"] = part;
+  b["parts"] = parts;
+  return b;
+}
+
+static void TestBackupParts() {
+  std::string whole;
+  for (int i = 0; i < 3000; ++i) whole += "line " + std::to_string(i) + "\n";
+  const size_t partRaw = whole.size() / 3 + 1;
+  const std::string sha = fs::Sha256Hex(whole);
+  fs::BackupParts store;
+  std::string why, raw;
+  CHECK(store.Add(BackupPart(whole, 3, 3, partRaw), 0, &why));
+  CHECK(store.Add(BackupPart(whole, 1, 3, partRaw), 1, &why));
+  CHECK(!store.Take(sha, 2, &raw));                          // part 2 missing
+  CHECK(store.Add(BackupPart(whole, 1, 3, partRaw), 2, &why));  // a duplicate is fine
+  CHECK(store.Add(BackupPart(whole, 2, 3, partRaw), 3, &why));
+  CHECK(store.Take(sha, 4, &raw) && raw == whole);
+  CHECK(!store.Take(sha, 5, &raw));                          // taken once
+  // A part whose data does not add up to the sha256: refused on take.
+  Json bad = BackupPart(whole, 1, 1, whole.size());
+  bad["sha256"] = std::string(64, 'a');
+  CHECK(store.Add(bad, 6, &why));
+  CHECK(!store.Take(std::string(64, 'a'), 7, &raw));
+  // Unsafe file names and bad part numbers are refused.
+  Json evil = BackupPart(whole, 1, 1, whole.size());
+  evil["file"] = "../x.txt";
+  CHECK(!store.Add(evil, 8, &why));
+  Json part0 = BackupPart(whole, 1, 3, partRaw);
+  part0["part"] = 4;
+  CHECK(!store.Add(part0, 9, &why));
+  // Incomplete transfers are dropped after two minutes.
+  CHECK(store.Add(BackupPart(whole, 1, 3, partRaw), 10, &why));
+  CHECK(store.Add(BackupPart(whole, 2, 3, partRaw), 200, &why));  // 190 s later: part 1 expired
+  CHECK(store.Add(BackupPart(whole, 3, 3, partRaw), 201, &why));
+  CHECK(!store.Take(sha, 202, &raw));
+}
+
 int main() {
   TestLiveStream();
   TestSubstitutes();
@@ -866,6 +915,7 @@ int main() {
   TestMapNames();
   TestResume();
   TestServerConfigPlan();
+  TestBackupParts();
   if (g_failures) {
     std::fprintf(stderr, "fleet_state_test: %d of %d checks FAILED\n", g_failures, g_checks);
     return 1;
