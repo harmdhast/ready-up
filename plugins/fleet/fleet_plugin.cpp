@@ -111,6 +111,11 @@ struct Handler {
 };
 std::vector<Handler> g_handlers;  // game thread
 bool g_drained = false;           // server.drain without the match plugin (HandleDrain)
+// A match plugin just registered match.assign (game thread): unless it publishes a reason itself
+// (publish_availability, newer match.so), fleet.so clears match_disabled on the next tick, with
+// the availability it last published through publish_state (an older match.so), else available.
+bool g_availFixPending = false, g_availPublished = false;
+std::string g_stateAvailSinceReg;
 uint64_t g_nextHandler = 1;
 std::atomic<bool> g_drainPosted{false};
 
@@ -808,9 +813,15 @@ uint64_t IfRegisterHandler(const char* type, ru_fleet_msg_fn fn, void* user) {
   if (!type || !fn) return 0;
   const std::string t = type;
   if (t != "*" && !fleet::IsValidType(t)) return 0;
+  const bool firstAssign = t == "match.assign" && !HasHandler("match.assign");
   const uint64_t id = g_nextHandler++;
   g_handlers.push_back(Handler{id, t, fn, user});
   UpdateHandledTypes();
+  if (firstAssign) {
+    g_availFixPending = true;
+    g_availPublished = false;
+    g_stateAvailSinceReg.clear();
+  }
   return id;
 }
 
@@ -831,6 +842,7 @@ int IfPublishState(const char* stateJson, const char* availability) {
   std::string avail = availability ? availability : "";
   if (!avail.empty() && avail != "available" && avail != "busy" && avail != "draining" && avail != "error") return 0;
   if (auto c = Client()) c->SetState(state, avail);
+  if (!avail.empty()) g_stateAvailSinceReg = avail;
   return 1;
 }
 
@@ -840,6 +852,7 @@ int IfPublishAvailability(const char* availability, const char* reason, const ch
   const std::string r = reason ? reason : "", d = detail ? detail : "";
   if (r.size() > 64 || d.size() > 128) return 0;
   if (auto c = Client()) c->SetAvailability(avail, r, d);
+  g_availPublished = true;
   return 1;
 }
 
@@ -1247,8 +1260,25 @@ void OnFrame(void*, const ru_tick_info*) {
   }
 }
 
+void FixAvailabilityAfterRegister() {
+  if (!g_availFixPending) return;
+  g_availFixPending = false;
+  if (g_availPublished || !HasHandler("match.assign")) return;
+  auto c = Client();
+  if (!c) return;
+  const std::string avail = g_stateAvailSinceReg.empty() ? "available" : g_stateAvailSinceReg;
+  c->SetAvailability(avail, "", "");
+  fleet::json::Value p = fleet::json::Value::Object();
+  p.Set("availability", fleet::json::Value::Str(avail));
+  p.Set("reason", fleet::json::Value::Str(avail == "available" ? "idle" : "assigned"));
+  p.Set("detail", fleet::json::Value::Null());
+  std::string err;
+  (void)c->Send("server.availability", fleet::json::Dump(p), 0, true, &err);
+}
+
 void OnTick(void*, const ru_tick_info* t) {
   try {
+    FixAvailabilityAfterRegister();
     if (g_lastTickNow > 0.0) {
       const double ms = (t->now - g_lastTickNow) * 1000.0;
       if (g_frameMs.size() < 512) g_frameMs.push_back(static_cast<float>(ms));

@@ -277,6 +277,23 @@ int main(int argc, char** argv) {
               f->publish_availability("maybe", nullptr, nullptr) == 0 &&
               f->publish_availability("busy", std::string(65, 'r').c_str(), nullptr) == 0,
           "publish_availability validates availability and lengths");
+    {
+      // An older match plugin registers match.assign and never publishes a reason: fleet.so
+      // itself says the server is available again, a frame later.
+      const size_t before = platform.MessagesOfType("server.availability").size();
+      const uint64_t hid = f->register_handler("match.assign", +[](void*, const ru_fleet_msg*) {}, nullptr);
+      Check(FramesUntil([&] {
+              const auto a = platform.MessagesOfType("server.availability");
+              return a.size() > before && a.back().payload()->Get("availability")->AsStr() == "available";
+            }, 3000),
+            "match.assign handler without a published reason: fleet.so clears match_disabled");
+      f->unregister_handler(hid);
+      Check(FramesUntil([&] {
+              const auto a = platform.MessagesOfType("server.availability");
+              return !a.empty() && a.back().payload()->Get("reason")->AsStr() == "match_disabled";
+            }, 3000),
+            "the last match.assign handler gone: match_disabled again");
+    }
     const std::string demoPath = std::string(dir) + "/host-demo.dem";
     const std::string spec = R"({"match_id":"m9","epoch":2,"map_number":1,"path":")" + demoPath + R"(","started_at":1})";
     Check(f->demo_stream_begin(spec.c_str()) == 1, "fleet mode: demo_stream_begin streams a platform demo");
