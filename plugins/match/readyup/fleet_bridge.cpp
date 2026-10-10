@@ -1634,17 +1634,23 @@ Result CmdReset() {
 // cmd add_time: the current round runs `seconds` longer. mp_roundtime only reaches the next round,
 // so the time goes on the gamerules' m_iRoundTime (CCSGameRulesProxy -> m_pGameRules), marked
 // changed so clients see it. Offsets come from the schema; -1 = not on this CS2 build.
-int g_rulesPtrOff = -2, g_roundTimeOff = -2;
+int g_rulesPtrOff = -1, g_roundTimeOff = -1;
 uint32_t g_rulesProxy = 0;
+
+// The schema offsets add_time writes through; looked up until found (-1 also means "schema not
+// verified yet", so a miss is not remembered).
+bool RoundTimeOffsets() {
+  if (g_rulesPtrOff < 0) g_rulesPtrOff = g_api->schema_offset(g_api->self, "CCSGameRulesProxy", "m_pGameRules");
+  if (g_roundTimeOff < 0) g_roundTimeOff = g_api->schema_offset(g_api->self, "CCSGameRules", "m_iRoundTime");
+  return g_rulesPtrOff >= 0 && g_roundTimeOff >= 0;
+}
 
 bool AddRoundTimeSeconds(int seconds, int* newRoundTime, std::string* why) {
   if (g_api->entity_system_status(g_api->self) != RU_ENTSYS_OK) {
     *why = "the entity system is not ready";
     return false;
   }
-  if (g_rulesPtrOff == -2) g_rulesPtrOff = g_api->schema_offset(g_api->self, "CCSGameRulesProxy", "m_pGameRules");
-  if (g_roundTimeOff == -2) g_roundTimeOff = g_api->schema_offset(g_api->self, "CCSGameRules", "m_iRoundTime");
-  if (g_rulesPtrOff < 0 || g_roundTimeOff < 0) {
+  if (!RoundTimeOffsets()) {
     *why = "not available on this CS2 build";
     return false;
   }
@@ -2018,7 +2024,7 @@ void EnsureHandlers() {
   f->add_capability("match.backup.v1");
   f->add_capability("match.resume.v1");
   f->add_capability("cmd.reset.v1");
-  f->add_capability("cmd.add_time.v1");
+  if (RoundTimeOffsets()) f->add_capability("cmd.add_time.v1");  // only where it can work
   f->add_capability("maps.workshop.v1");
   f->add_capability("mode.wingman.v1");
   f->add_capability("mode.simulation.v1");
