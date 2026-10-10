@@ -169,19 +169,27 @@ bool Send(const std::string& type, const Json& payload, long long epoch, bool re
   return f->send_event(type.c_str(), body.c_str(), epoch, flags) == 1;
 }
 
+// The players the platform last got (PlayersJson), checked every second: a snapshot goes out
+// when someone joins, leaves or changes team, assigned or not (the platform lists them for kick).
+std::string g_playersSent;
+double g_playersCheckAt = 0;
+
 bool SendSnapshot(const char* reason, bool withStats) {
   const ru_fleet_v1* f = Fleet();
   if (!FleetActive(f) || !FLEET_HAS(f, send_snapshot)) return false;
   // Who is connected, assigned or not (the platform lists them for kick).
   std::vector<std::tuple<uint64_t, std::string, int>> humans;
   for (const auto& h : ListHumans()) humans.emplace_back(h.steamid64, h.name, h.team);
-  std::string extra = std::string("{\"players\":") + fs::PlayersJson(humans).Dump();
+  const std::string players = fs::PlayersJson(humans).Dump();
+  std::string extra = std::string("{\"players\":") + players;
   if (withStats && g_asg.active) {
     std::lock_guard<std::recursive_mutex> lk(stats::Mutex());
     extra += std::string(",\"map_stats\":") + stats::ToJson(stats::Current().Snapshot());
   }
   extra += "}";
-  return f->send_snapshot(reason, extra.c_str()) == 1;
+  const bool sent = f->send_snapshot(reason, extra.c_str()) == 1;
+  if (sent) g_playersSent = players;
+  return sent;
 }
 
 // ---------------------------------------------------------------------------- replies
@@ -2139,6 +2147,12 @@ void Tick(double now) {
     r.haveOutput = true;
     Reply(it->ref, it->epoch, r, it->auditId);
     it = g_execs.erase(it);
+  }
+  if (now >= g_playersCheckAt) {
+    g_playersCheckAt = now + 1.0;
+    std::vector<std::tuple<uint64_t, std::string, int>> humans;
+    for (const auto& h : ListHumans()) humans.emplace_back(h.steamid64, h.name, h.team);
+    if (fs::PlayersJson(humans).Dump() != g_playersSent) (void)SendSnapshot("request", g_asg.active);
   }
   if (!g_asg.active) {
     (void)signals::Take();
