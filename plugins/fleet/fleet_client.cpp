@@ -266,9 +266,58 @@ void Client::SetState(const std::string& stateJson, const std::string& availabil
 }
 
 void Client::SetHandledTypes(std::set<std::string> types, bool wildcard) {
+  std::function<void()> wake;
+  {
+    std::lock_guard<std::mutex> lk(mu_);
+    handled_ = std::move(types);
+    handledAll_ = wildcard;
+    wake = wake_;
+  }
+  if (wake) wake();  // the network thread delivers what was held for these types
+}
+
+void Client::HoldUnhandled(const std::string& typePrefix, int64_t windowMs) {
   std::lock_guard<std::mutex> lk(mu_);
-  handled_ = std::move(types);
-  handledAll_ = wildcard;
+  holdPrefix_ = typePrefix;
+  holdUntilMono_ = MonotonicMs() + windowMs;
+}
+
+void Client::ReleaseHeld(const std::function<void(const Envelope&)>& answerUnknown) {
+  if (held_.empty()) return;
+  bool any = false;
+  for (auto it = held_.begin(); it != held_.end();) {
+    bool handled, expired;
+    {
+      std::lock_guard<std::mutex> lk(mu_);
+      handled = handledAll_ || handled_.count(it->type) > 0;
+      expired = MonotonicMs() >= holdUntilMono_;
+    }
+    if (handled) {
+      Inbound in;
+      in.reliable = true;
+      in.payloadJson = json::Dump(it->payload);
+      in.env = std::move(*it);
+      {
+        std::lock_guard<std::mutex> lk(mu_);
+        inbox_.push_back(std::move(in));
+      }
+      any = true;
+      it = held_.erase(it);
+    } else if (expired && answerUnknown) {  // (the session loop only delivers; answers need a frame)
+      answerUnknown(*it);
+      it = held_.erase(it);
+    } else {
+      ++it;
+    }
+  }
+  if (any) {
+    std::function<void()> wake;
+    {
+      std::lock_guard<std::mutex> lk(mu_);
+      wake = wake_;
+    }
+    if (wake) wake();
+  }
 }
 
 void Client::SetWake(std::function<void()> wake) {
@@ -1104,6 +1153,7 @@ Client::SessionResult Client::RunSession() {
       return finish(SessionEnd::Closed);
     }
     spool_.MaybeFlush(nowWall);
+    ReleaseHeld(nullptr);  // a handler registered since: deliver what was held for it
     PublishSpoolStatus();
     if (s.broken) break;
 
@@ -1187,6 +1237,15 @@ void Client::HandleInbound(Session& s, const std::string& text) {
     }
     rx_.OnAckSent(ack, NowMs());
   };
+  auto answerUnknown = [&](const Envelope& m) {
+    json::Value err = json::Value::Object();
+    err.Set("code", json::Value::Str("unknown_type"));
+    err.Set("message", json::Value::Str("no handler for " + m.type + " on this server"));
+    err.Set("type", json::Value::Str(m.type));
+    rx_.MarkDone(m.seq, NowMs());
+    sendEph("error", err, m.id);
+  };
+  ReleaseHeld(answerUnknown);
 
   if (e.type == "ping") {
     json::Value pong = json::Value::Object();
@@ -1275,12 +1334,18 @@ void Client::HandleInbound(Session& s, const std::string& text) {
     return;
   }
   if (!handled) {
-    json::Value err = json::Value::Object();
-    err.Set("code", json::Value::Str("unknown_type"));
-    err.Set("message", json::Value::Str("no handler for " + e.type + " on this server"));
-    err.Set("type", json::Value::Str(e.type));
-    rx_.MarkDone(e.seq, now);
-    sendEph("error", err, e.id);
+    bool hold;
+    {
+      std::lock_guard<std::mutex> lk(mu_);
+      hold = !holdPrefix_.empty() && e.type.compare(0, holdPrefix_.size(), holdPrefix_) == 0 &&
+             MonotonicMs() < holdUntilMono_ && held_.size() < 64;
+    }
+    if (hold) {
+      Log(3, "fleet: holding " + e.type + " seq " + std::to_string(e.seq) + " until its handler is there");
+      held_.push_back(std::move(e));
+      return;
+    }
+    answerUnknown(e);
     return;
   }
   Inbound in;

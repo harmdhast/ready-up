@@ -167,6 +167,13 @@ class Client {
   // Types some handler wants. Reliable messages of other types are answered with
   // error{unknown_type} and acked (§5).
   void SetHandledTypes(std::set<std::string> types, bool wildcard);
+  // For `windowMs` from now, a reliable message whose type starts with `typePrefix` and that no
+  // handler wants yet is held (not acked, not answered) and delivered once a handler for it is
+  // set: a replayed match.unassign must not be lost while the match plugin is still starting.
+  // Past the window, held ones get the usual unknown_type answer (max 64 held).
+  void HoldUnhandled(const std::string& typePrefix, int64_t windowMs);
+  // Network thread: deliver held messages a handler now wants; answer the expired ones.
+  void ReleaseHeld(const std::function<void(const Envelope&)>& answerUnknown);
   // Called (from the network thread) whenever TakeInbound() has something.
   void SetWake(std::function<void()> wake);
 
@@ -230,6 +237,9 @@ class Client {
   std::deque<Inbound> inbox_;
   std::vector<int64_t> processed_;  // seqs the game thread finished
   std::set<std::string> handled_;
+  std::string holdPrefix_;
+  int64_t holdUntilMono_ = 0;
+  std::deque<Envelope> held_;  // network thread only
   bool handledAll_ = false;
   std::function<void()> wake_;
   std::string pendingEnrollSecret_, pendingEnrollUrl_;
