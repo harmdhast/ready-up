@@ -10,6 +10,7 @@ set(MATCH_SOURCES
   readyup/admin_check.cpp
   readyup/at_payloads.cpp
   readyup/backup_files.cpp
+  readyup/stale_backups.cpp
   readyup/card_html.cpp
   readyup/golive_card_logic.cpp
   readyup/coach.cpp
@@ -230,6 +231,11 @@ add_test(NAME match_live_cards COMMAND match_live_cards_test)
 # Round restore + crash recovery (readyup/round_restore_rules.h): backup file names and the list,
 # `.restore <round>` parsing and refusals, pause_after_restore resolution, the progress record and
 # what a restarted server recovers (ctest `match_restore`).
+add_executable(match_stale_backups_test tests/stale_backups_test.cpp readyup/stale_backups.cpp)
+target_include_directories(match_stale_backups_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_options(match_stale_backups_test PRIVATE -Wall -Wextra)
+add_test(NAME match_stale_backups COMMAND match_stale_backups_test)
+
 add_executable(match_restore_test tests/restore_test.cpp readyup/round_restore_rules.cpp readyup/match_end_logic.cpp
   readyup/match_rules.cpp readyup/match_stats.cpp ${CMAKE_SOURCE_DIR}/libs/readyup/minijson.cpp
   ${CMAKE_SOURCE_DIR}/libs/readyup/status_snapshot.cpp)
