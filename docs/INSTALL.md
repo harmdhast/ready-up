@@ -527,8 +527,10 @@ Ready Up maintains its own lightweight mode state machine and can display a **no
   - `ru_warmup_startmoney <0..60000>` (sets `mp_startmoney`)
   - `ru_warmup_maxmoney <0..60000>` (sets `mp_maxmoney`)
   - `ru_warmup_buy_anywhere 0|1` (toggles `mp_buy_anywhere`)
-  - `ru_warmup_infinite_ammo 0|1` (toggles `sv_infinite_ammo`)
-    - `1` sets `sv_infinite_ammo 2` (infinite ammo with reload)
+  - `ru_warmup_infinite_ammo 0|1` (default `1`): infinite reserve ammo in scrim and match warmup
+    - `1`: each weapon's reserve stays at the most it had since it was picked up; magazines still
+      need a reload (like `sv_infinite_ammo 2`, which CS2 resets with `sv_cheats 0`, so it is not used)
+    - also with `ru_cfg_exec_enable 1`; not while a restored match waits in its recovery gate
 - **Mode cfg exec (optional, MatchZy-style)**:
   - `ru_cfg_exec_enable 0|1`
   - When enabled, Ready Up will:

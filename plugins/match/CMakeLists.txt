@@ -30,6 +30,7 @@ set(MATCH_SOURCES
   readyup/golive_card.cpp
   readyup/host.cpp
   readyup/idle_refresh.cpp
+  readyup/warmup_ammo.cpp
   readyup/warmup_money.cpp
   readyup/warmup_score.cpp
   readyup/weapon_cleanup.cpp

@@ -22,6 +22,7 @@
 #include "readyup/game_timers.h"
 #include "readyup/host.h"
 #include "readyup/idle_refresh.h"
+#include "readyup/warmup_ammo.h"
 #include "readyup/warmup_money.h"
 #include "readyup/warmup_score.h"
 #include "readyup/weapon_cleanup.h"
@@ -191,6 +192,7 @@ void OnTick(void*, const ru_tick_info* t) {
       VotesTick(t->now);        // .gg / .stop vote timeouts (votes.h)
       WarmupMoneyTick(t->now);  // warmup money top-up (warmup_money.h)
       WarmupScoreTick(t->now);  // no round counts in warmup (warmup_score.h)
+      WarmupAmmoTick();         // warmup reserve ammo (warmup_ammo.h)
       match_settings::Tick(t->now);  // autoready, kick_when_no_match_loaded, hostname_format
       WeaponCleanupTick(t->now);  // dropped weapons in warmup (weapon_cleanup.h)
       CoachTick(t->now);          // coaches: m_iCoachingTeam, sv_coaching_enabled (coach.h)
