@@ -24,6 +24,7 @@
 #include "readyup/idle_refresh.h"
 #include "readyup/warmup_money.h"
 #include "readyup/weapon_cleanup.h"
+#include "readyup/hud_steady.h"
 #include "readyup/local_store.h"
 #include "readyup/simulation.h"
 #include "readyup/logging.h"
@@ -196,6 +197,7 @@ void OnTick(void*, const ru_tick_info* t) {
     fleet_bridge::Tick(t->now);
     // One-off cards before the HUD: the HUD leaves a player's panel alone while one is up.
     if (FeatureEnabled(Feature::MatchFlow)) GoLiveCardTick();  // "LIVE · GO GO GO" (golive_card.h)
+    HudSteadyTick();  // m_bGameRestart so center panels do not blink (hud_steady.h)
     AdminCallTick();  // `.admin` cards for in-game admins (admin_call.h)
     if (FeatureEnabled(Feature::WelcomeHtml)) WelcomeTick();
     if (FeatureEnabled(Feature::ReadyHud)) ReadyHudTick();  // skips players whose welcome card is up
@@ -212,6 +214,7 @@ void OnEvent(void*, const ru_event* e) {
       EsportsOnMapStart();  // the GOTV client is looked for again
       demo::OnMapStart();  // GOTV's recording ended with the level change
       fleet_bridge::OnMapStart();
+      HudSteadyOnMapStart();  // cs_gamerules is a new entity
       match_recovery::OnMapStart();  // a recovery changing to the match map continues
       // Every map of a real match starts without bots: the gamemode cfg brings bot_quota back on
       // each level change, and a bot alive on a team kept a joining player spectating it (live

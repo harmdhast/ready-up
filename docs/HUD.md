@@ -5,13 +5,17 @@ event (`loc_token` = HTML). Tested in game on CS2 1.41.8.3 with `.ru hud test 1-
 
 ## Refresh rules
 
-- The panel stays up for a short fixed time; the event's `duration` does not
-  keep it open.
-- Each send creates a new panel that fades in over the old one.
+- The panel stays up for a few hundred ms; the event's `duration` does not keep it open.
+- Each send replays the panel's fade-in, so a panel resent every frame blinks. Tested on CS2
+  1.41.9.0: every frame and 50 ms blink, 100 ms shows the fade-in cut off, 250 ms pulses, 500 ms
+  opens and closes.
+- The match plugin sets `CCSGameRules::m_bGameRestart` every tick while no restart is pending
+  (`hud_steady=1`, default; workaround by Poggu, as in girlglock/CS2FlashingHtmlHudFix). With it,
+  a panel resent every frame stays steady. While a restart is pending (`m_flRestartRoundTime`
+  after the current round's start) the flag is false, and `mp_restartgame` still works.
 - Steady display: resend every frame (`hud_tick_ms=0`, `hud_resend_ms=0`,
-  `hud_duration_s=1`). These are the defaults.
-- Slower resends (1s/2s, 8s/10s) make the panel open and close. The welcome card and the
-  go-live card use the same every-frame cadence.
+  `hud_duration_s=1`, the defaults) with `hud_steady=1`. The welcome card and the go-live card
+  use the same every-frame cadence.
 - An `<img>` in a panel that is resent every frame flashes, because the image is
   reloaded on each send. Only use images in one-off sends.
 
