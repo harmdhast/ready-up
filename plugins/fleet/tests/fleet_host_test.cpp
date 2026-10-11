@@ -195,6 +195,25 @@ int main(int argc, char** argv) {
   const auto hellos = platform.MessagesOfType("hello");
   Check(!hellos.empty() && hellos[0].payload()->Get("versions")->Get("plugins")->Get("fleet") != nullptr,
         "hello carries the plugin versions");
+  Check(!hellos.empty() && hellos[0].payload()->Get("availability")->AsStr() == "busy" &&
+            hellos[0].payload()->Get("reason") && hellos[0].payload()->Get("reason")->AsStr() == "match_disabled",
+        "no match plugin: hello says busy, match_disabled");
+  Check(platform.SendToServer("server.drain", R"({"reason":"cs2 update"})", true), "server.drain sent");
+  Check(FramesUntil([&] {
+          for (const auto& m : platform.MessagesOfType("server.availability"))
+            if (m.payload()->Get("reason")->AsStr() == "draining" && m.payload()->Get("detail") &&
+                m.payload()->Get("detail")->AsStr() == "cs2 update" && m.payload()->Get("availability")->AsStr() == "draining")
+              return true;
+          return false;
+        }, 3000),
+        "drain without the match plugin: draining, detail = drain reason");
+  Check(platform.SendToServer("server.undrain", "{}", true), "server.undrain sent");
+  Check(FramesUntil([&] {
+          const auto a = platform.MessagesOfType("server.availability");
+          return !a.empty() && a.back().payload()->Get("availability")->AsStr() == "busy" &&
+                 a.back().payload()->Get("reason")->AsStr() == "match_disabled";
+        }, 3000),
+        "undrain without the match plugin: back to busy, match_disabled");
   {
     const auto* st = hellos.empty() ? nullptr : hellos[0].payload()->Get("selftest");
     Check(st && st->Get("pass") && st->Get("pass")->AsBool() && st->Get("passed")->AsInt() == 58 &&
@@ -253,6 +272,28 @@ int main(int argc, char** argv) {
           "send_event reached the platform with a seq");
     Check(f && f->publish_state("{\"match_id\":\"m9\"}", "busy") == 1 && f->publish_state("[1]", nullptr) == 0,
           "publish_state validates its JSON");
+    Check(f && f->struct_size >= offsetof(ru_fleet_v1, publish_availability) + sizeof(f->publish_availability) &&
+              f->publish_availability("busy", "local_match", "cup-final") == 1 &&
+              f->publish_availability("maybe", nullptr, nullptr) == 0 &&
+              f->publish_availability("busy", std::string(65, 'r').c_str(), nullptr) == 0,
+          "publish_availability validates availability and lengths");
+    {
+      // An older match plugin registers match.assign and never publishes a reason: fleet.so
+      // itself says the server is available again, a frame later.
+      const size_t before = platform.MessagesOfType("server.availability").size();
+      const uint64_t hid = f->register_handler("match.assign", +[](void*, const ru_fleet_msg*) {}, nullptr);
+      Check(FramesUntil([&] {
+              const auto a = platform.MessagesOfType("server.availability");
+              return a.size() > before && a.back().payload()->Get("availability")->AsStr() == "available";
+            }, 3000),
+            "match.assign handler without a published reason: fleet.so clears match_disabled");
+      f->unregister_handler(hid);
+      Check(FramesUntil([&] {
+              const auto a = platform.MessagesOfType("server.availability");
+              return !a.empty() && a.back().payload()->Get("reason")->AsStr() == "match_disabled";
+            }, 3000),
+            "the last match.assign handler gone: match_disabled again");
+    }
     const std::string demoPath = std::string(dir) + "/host-demo.dem";
     const std::string spec = R"({"match_id":"m9","epoch":2,"map_number":1,"path":")" + demoPath + R"(","started_at":1})";
     Check(f->demo_stream_begin(spec.c_str()) == 1, "fleet mode: demo_stream_begin streams a platform demo");

@@ -75,6 +75,9 @@ struct HelloInfo {
   std::string bootId;
   std::string stateJson = "null";  // MatchState or null
   std::string availability = "available";
+  // Busy reason / detail (hello.reason / detail, state.snapshot.availability_reason / _detail);
+  // "" = null. Owned by SetAvailability / SetState: SetHelloInfo keeps them.
+  std::string availabilityReason, availabilityDetail;
   int64_t adminsRev = -1;  // cached admins.set rev (hello.admins_rev); -1 = none
   // Plugins the core did not load on this CS2 build (needs.json not met): name -> reason
   // (hello.plugins_disabled; core/include/readyup/plugin_needs_iface.h). Empty = left out.
@@ -163,7 +166,10 @@ class Client {
   void NoteGameFrame();
   // Milliseconds since the last NoteGameFrame, or -1 before the first.
   int64_t FrameAgeMs() const;
+  // A non-empty availability also clears the busy reason and detail.
   void SetState(const std::string& stateJson, const std::string& availability);
+  // Availability with its busy reason and detail ("" = null).
+  void SetAvailability(const std::string& availability, const std::string& reason, const std::string& detail);
   // Types some handler wants. Reliable messages of other types are answered with
   // error{unknown_type} and acked (§5).
   void SetHandledTypes(std::set<std::string> types, bool wildcard);

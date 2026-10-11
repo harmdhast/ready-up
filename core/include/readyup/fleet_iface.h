@@ -163,6 +163,16 @@ typedef struct ru_fleet_v1 {
   /* Game thread. The recording of `path` stopped (tv_stoprecord queued after the GOTV flush):
    * fleet.so sends the rest once the file stops growing, then demo.end. 1 = a known stream. */
   int (*demo_stream_end)(const char* path);
+  /* ---- appended (busy reason, FLEET.md §8) ---- */
+  /*
+   * Game thread. The availability with why the server is busy: `reason` local_match |
+   * awaiting_reset | assigned | match_disabled | draining (NULL / "" = none, the server is
+   * available), `detail` the match id, local slug or drain reason (NULL / "" = null). Sent in hello
+   * (reason, detail) and state.snapshot (availability_reason, availability_detail). Call it after
+   * publish_state, which clears both. 1 = stored, 0 = invalid (availability not in the enum,
+   * reason > 64 or detail > 128 bytes).
+   */
+  int (*publish_availability)(const char* availability, const char* reason, const char* detail);
   /* v1.x: members are appended here. */
 } ru_fleet_v1;
 

@@ -68,7 +68,7 @@ Choices made where this document leaves room:
   on a re-run with the same outcome) hello carries the new one and `server.selftest` (reliable, same
   object, schema proposed in `plugins/fleet/protocol/v1/messages/server.selftest.json`) goes out.
 - `server.drain` / `server.undrain` (match plugin): drain is held in memory (a restart clears it); while
-  set the availability reads `draining` (a `server.availability` with reason `drain` is sent) and
+  set the availability reads `draining` (a `server.availability` with reason `draining` is sent) and
   `match.assign` is refused with `busy`; the running series finishes. `server.cs2_update_required`
   is sent once per new required version (Steam UpToDateCheck, every 30 min).
 - `hello.versions.plugins` lists only `fleet` for now (match is still compiled into the core).
@@ -887,8 +887,11 @@ applies `patch` when `rev == stored_rev + 1`; on a gap it sends `state.request`.
 | `admin_called` | `{ call_id, player: { steamid64, name, team: "team1"\|"team2"\|"spectator"\|null, side: "ct"\|"t"\|null }, message, called_at }` | `.admin [message]` (`admin_call.h`, [ADMINS.md](ADMINS.md)) | admin notification; the platform resolves it |
 | `error` | `{ code, message, fatal }` | any | alert admins |
 
-Server-level: `server.availability {availability, reason}` (a `ServerReset` from `match_end.h`
-→ `available`), `server.cs2_update_required {required_build}`, `server.selftest {pass, passed, total, failures}` (on every change of the outcome).
+Server-level: `server.availability {availability, reason, detail}` (a `ServerReset` from `match_end.h`
+→ `available`). A busy server says why in `reason`: `local_match` (detail = local slug),
+`awaiting_reset` (series over, waiting for the reset; detail = match id), `assigned` (detail = match
+id), `match_disabled` (no match plugin), `draining` (detail = drain reason). hello carries the same
+pair as `reason` / `detail`, state.snapshot as `availability_reason` / `availability_detail`. Also `server.cs2_update_required {required_build}`, `server.selftest {pass, passed, total, failures}` (on every change of the outcome).
 
 ### 8.2 Snapshot
 

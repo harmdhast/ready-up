@@ -216,6 +216,7 @@ TEST(TestEnrollConnectPingAck) {
   CHECK_EQ(hp->Get("stream")->Get("last_tx_seq")->AsInt(), int64_t(0));
   CHECK(hp->Get("state")->IsNull());
   CHECK_EQ(hp->Get("availability")->AsStr(), std::string("available"));
+  CHECK(hp->Get("reason") && hp->Get("reason")->IsNull());
   CHECK_EQ(hp->Get("plugins_disabled")->a.at(0).Get("name")->AsStr(), std::string("skins"));
   CHECK_EQ(hp->Get("plugins_state")->Get("installed")->a.size(), size_t(2));
   CHECK_EQ(hp->Get("plugins_state")->Get("installed")->a.at(0).AsStr(), std::string("match"));
@@ -742,6 +743,52 @@ TEST(TestDemoStreaming) {
   p.Stop();
 }
 
+// The busy reason rides on hello (reason / detail) and state.snapshot (availability_reason /
+// availability_detail); publishing a plain availability clears it.
+TEST(TestAvailabilityReason) {
+  mock::Platform p;
+  CHECK(p.Start());
+  const std::string dir = TempDir();
+  ClientConfig cfg = BaseConfig(p, dir);
+  cfg.enrollCode = "RUE-7F3K-9QX2-LM4D";
+  Client c(cfg);
+  c.SetHelloInfo(Hello());
+  c.SetAvailability("busy", "local_match", "cup-final");
+  {
+    HelloInfo again = Hello();  // a later refresh (capabilities), as fleet.so sends it: no availability
+    again.availability.clear();
+    c.SetHelloInfo(again);
+  }
+  std::string err;
+  CHECK(c.Start(&err));
+  CHECK(WaitState(c, LinkState::Online, 5000));
+  CHECK(p.WaitFor([&] { return !p.MessagesOfType("hello").empty(); }, 2000));
+  const auto hello = p.MessagesOfType("hello").at(0);
+  CHECK_EQ(hello.payload()->Get("availability")->AsStr(), std::string("busy"));
+  CHECK_EQ(hello.payload()->Get("reason")->AsStr(), std::string("local_match"));
+  CHECK_EQ(hello.payload()->Get("detail")->AsStr(), std::string("cup-final"));
+  CHECK(c.SendSnapshot("request", ""));
+  CHECK(p.WaitFor([&] { return !p.MessagesOfType("state.snapshot").empty(); }, 2000));
+  const auto snap = p.MessagesOfType("state.snapshot").back();
+  CHECK_EQ(snap.payload()->Get("availability_reason")->AsStr(), std::string("local_match"));
+  CHECK_EQ(snap.payload()->Get("availability_detail")->AsStr(), std::string("cup-final"));
+  auto requests = [&] {
+    std::vector<mock::Received> out;
+    for (const auto& m : p.MessagesOfType("state.snapshot"))
+      if (m.payload()->Get("reason")->AsStr() == "request") out.push_back(m);
+    return out;
+  };
+  c.SetState("null", "available");
+  CHECK(c.SendSnapshot("request", ""));
+  CHECK(p.WaitFor([&] { return requests().size() >= 2; }, 2000));
+  const auto snap2 = requests().back();
+  CHECK(snap2.payload()->Get("availability_reason")->IsNull());
+  CHECK(snap2.payload()->Get("availability_detail")->IsNull());
+  CheckSchemas(p);
+  c.Stop();
+  p.Stop();
+}
+
 // A reliable match.* message that arrives before the match plugin registered (startup) is held, not
 // acked and not answered unknown_type, and is delivered once a handler for it is there. Past the
 // window it gets today's answer.
@@ -802,6 +849,7 @@ TEST(TestHoldUnhandledWindowEnds) {
 int main() {
   RUN(TestSchemaValidator);
   RUN(TestEnrollConnectPingAck);
+  RUN(TestAvailabilityReason);
   RUN(TestHoldUnhandledAtStartup);
   RUN(TestHoldUnhandledWindowEnds);
   RUN(TestReconnectResumeReset);
