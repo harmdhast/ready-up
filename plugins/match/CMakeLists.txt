@@ -34,6 +34,7 @@ set(MATCH_SOURCES
   readyup/weapon_cleanup.cpp
   readyup/knife_tracker.cpp
   readyup/local_store.cpp
+  readyup/log_relay.cpp
   readyup/ru_commands.cpp
   readyup/map_names.cpp
   readyup/mat_admins.cpp

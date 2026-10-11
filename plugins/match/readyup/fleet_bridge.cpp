@@ -12,6 +12,7 @@
 #include "readyup/esports.h"
 #include "readyup/fleet_state.h"
 #include "readyup/local_store.h"
+#include "readyup/log_relay.h"
 #include "readyup/logging.h"
 #include "readyup/map_names.h"
 #include "readyup/match_config_parser.h"
@@ -99,6 +100,7 @@ std::string g_unpauseBy;
 double g_lastPoll = -1e9;
 double g_lastPeriodic = -1e9;
 double g_now = 0;
+LogRelay g_logRelay;
 
 // Deferred work (game thread).
 struct PendingKick {
@@ -1804,7 +1806,10 @@ void OnOfflineTimeout(const ru_fleet_msg*) {
 
 void OnConnection(const ru_fleet_msg* m) {
   Json p = ParsePayload(m);
-  if (Str(p, "state") != "online") return;
+  if (Str(p, "state") != "online") {
+    g_logRelay.Stop();
+    return;
+  }
   // §8.2: the platform gets the current state on every connect (hello carries it too; this one
   // also has map_stats).
   if (g_asg.active) SendSnapshot("hello", true);
@@ -1838,6 +1843,20 @@ void OnAdminsSet(const ru_fleet_msg* m) {
   }
 }
 
+void OnLogsStart(const ru_fleet_msg* m) { g_logRelay.Start(g_now, Bool(ParsePayload(m), "backlog")); }
+
+void SendLogBatches() {
+  while (auto b = g_logRelay.Take(g_now)) {
+    Json lines = Json::Array();
+    for (const auto& l : b->lines) lines.Push(l);
+    Json p = Json::Object();
+    p["lines"] = std::move(lines);
+    p["backlog"] = b->backlog;
+    p["dropped"] = b->dropped;
+    Send("logs.lines", p, 0, false);
+  }
+}
+
 void OnMessage(void*, const ru_fleet_msg* m) {
   if (!m || !m->type) return;
   try {
@@ -1852,6 +1871,8 @@ void OnMessage(void*, const ru_fleet_msg* m) {
     else if (t == "server.config") OnServerConfig(m);
     else if (t == "server.drain") OnDrain(true, m);
     else if (t == "server.undrain") OnDrain(false, m);
+    else if (t == "logs.start") OnLogsStart(m);
+    else if (t == "logs.stop") g_logRelay.Stop();
   } catch (const std::exception& e) {
     Print("fleet: handling %s threw: %s\n", m->type, e.what());
   }
@@ -1871,7 +1892,7 @@ void EnsureHandlers() {
   g_handlerIds.clear();  // a new fleet.so image has no registrations
   for (const char* type : {"match.assign", "match.update", "match.unassign", "cmd", "local.offline_timeout",
                            "local.connection", "admins.set", "server.config", "server.drain",
-                           "server.undrain"}) {
+                           "server.undrain", "logs.start", "logs.stop"}) {
     const uint64_t id = f->register_handler(type, &OnMessage, nullptr);
     if (id) g_handlerIds.push_back(id);
   }
@@ -1881,6 +1902,7 @@ void EnsureHandlers() {
   f->add_capability("maps.workshop.v1");
   f->add_capability("mode.wingman.v1");
   f->add_capability("mode.simulation.v1");
+  f->add_capability("logs.v1");
   PublishAdminsRev();
   g_lastPublishedAvail.clear();
   if (g_asg.active) {
@@ -1977,7 +1999,9 @@ void OnCoreEvent(const ru_event* e) {
 }
 
 void OnLogLine(const char* line) {
-  if (g_execs.empty() || !line) return;
+  if (!line) return;
+  g_logRelay.Push(line, g_now);
+  if (g_execs.empty()) return;
   for (auto& x : g_execs) {
     if (x.output.size() >= kExecOutputMax) continue;
     x.output.append(line);
@@ -1992,6 +2016,7 @@ void Tick(double now) {
   RunDeferredRestore();
   const ru_fleet_v1* f = Fleet();
   CheckCs2Update(now, FleetActive(f));
+  SendLogBatches();
   if (!g_asg.active) {
     (void)signals::Take();
     if (f && now - g_lastIdlePublish >= 1.0) {
