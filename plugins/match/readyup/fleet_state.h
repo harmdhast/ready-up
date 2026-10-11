@@ -98,8 +98,12 @@ bool ValidateAssign(const Json& payload, std::string* err);
 // match_id itself when it is all digits (1..15 of them), else a 52-bit FNV-1a hash, never 0.
 unsigned long long NumericMatchId(const std::string& matchId);
 
+// The assignment's numeric id: config.id (the platform's own match number, unique where slugs
+// repeat across tournaments) when present, else NumericMatchId(matchId).
+unsigned long long AssignMatchId(const std::string& matchId, const Json& config);
+
 // The MAT MatchConfig document Ready Up's parser (match_config_parser.h) and the recovery
-// store take, built from match.assign.config: matchid, num_maps, maplist, map_sides, team1/2
+// store take, built from match.assign.config: matchid (AssignMatchId), num_maps, maplist, map_sides, team1/2
 // {name, tag, players{steamid64: name}, captain_steamid64}, spectators, admins, maxRounds,
 // overtimeMode / overtimeSegments / maxOvertimes, damageTiebreak*, knifeDecisionSeconds,
 // clinch_series and cvars (engine cvars only: mp_*, sv_*, tv_*, bot_*; never sv_password, which
