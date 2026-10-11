@@ -538,14 +538,15 @@ void ApplyLoadedMatch(const WebhookMatchContext& loaded, const std::string& conf
   (void)EnqueueServerCommand("bot_kick");
   (void)EnqueueServerCommand("bot_quota 0");
 
-  // Enable CS2 round backups for recovery.
+  // CS2 round backups for recovery: the file prefix now, written from the go-live on
+  // (round_restore::EnableRoundBackups), never in warmup or the knife round.
   // Prefix includes matchid and map number to avoid collisions.
   {
     const int mapNumber = firstMapNumber;
     const std::string prefix =
         "readyup_backup_" + std::to_string(static_cast<unsigned long long>(ctx.matchid)) +
         "_map" + std::to_string(mapNumber) + "_";
-    (void)EnqueueServerCommand("mp_backup_round_auto 1");
+    (void)EnqueueServerCommand("mp_backup_round_auto 0");
     (void)EnqueueServerCommand("mp_backup_restore_load_autopause 1");
     const std::string cmd = "mp_backup_round_file " + prefix;
     (void)EnqueueServerCommand(cmd.c_str());

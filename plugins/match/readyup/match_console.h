@@ -20,9 +20,10 @@ bool MatchConsoleCommand(const std::string& line);
 bool LoadMatchFromUrl(const std::string& url);
 
 // Loads a parsed match: closes a previous match's webhooks, sets the context, enters warmup,
-// persists `configJson` for recovery, kicks bots, turns on CS2 round backups
-// (readyup_backup_<matchid>_map<N>_*) and changes to map N = `firstMapNumber` (1, or the map a
-// fleet failover resumes), also when the server is already on it (LoadMapEntry). Game thread.
+// persists `configJson` for recovery, kicks bots, sets the CS2 round backup file
+// (readyup_backup_<matchid>_map<N>_*, written once the match is live) and changes to map N =
+// `firstMapNumber` (1, or the map a fleet failover resumes), also when the server is already on
+// it (LoadMapEntry). Game thread.
 // Used by `ru match load` and by the fleet link's match.assign (fleet_bridge.cpp).
 void ApplyLoadedMatch(const WebhookMatchContext& ctx, const std::string& configJson, int firstMapNumber = 1);
 

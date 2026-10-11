@@ -220,5 +220,12 @@ inline bool ForwardsBackup(int roundsPlayed, int firstRound) { return roundsPlay
 // A backup file name from the platform that is safe to write into csgo/ (no directories,
 // ends in .txt, [A-Za-z0-9_.-] only).
 bool SafeBackupFileName(const std::string& name);
+// A round backup the scan forwards (fleet_bridge.cpp): "<prefix>...roundNN.txt" written since the
+// match went live (`liveSinceMs`, the file clock, -1 = not live). The go-live round's own file is
+// written in the frame the mode turns live, so kLiveBackupSlackMs before counts too. Older files
+// (a warmup, an earlier live session, before a server restart) stay local.
+constexpr long long kLiveBackupSlackMs = 2000;
+bool LiveSessionBackup(const std::string& fileName, const std::string& prefix, long long mtimeMs,
+                       long long liveSinceMs);
 
 }  // namespace readyup::fleetstate
