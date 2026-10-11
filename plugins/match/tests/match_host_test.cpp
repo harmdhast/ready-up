@@ -111,6 +111,8 @@ struct FakePlayer {
   bool bot;
   const char* name;
 };
+// player_change_team reports success but leaves the team as is (a full team, a refused move).
+static bool g_refuseTeamChange = false;
 static std::vector<FakePlayer> g_players = {
     {2, 2, 76561198000000001ull, 3, false, "alice"},
 };
@@ -173,6 +175,15 @@ void FillEngineApi(ru_api* a) {
       if (!fn(user, &r)) break;
     }
     return n;
+  };
+  a->player_change_team = [](ru_plugin*, int slot, int team) {
+    for (auto& p : g_players) {
+      if (p.slot == slot) {
+        if (!g_refuseTeamChange) p.team = team;
+        return 1;
+      }
+    }
+    return 0;
   };
   a->ev_get_int = [](ru_plugin*, const ru_game_event*, const char*, int def) { return def; };
   a->ev_get_float = [](ru_plugin*, const ru_game_event*, const char*, double def) { return def; };
@@ -247,6 +258,14 @@ static bool Logged(const std::string& needle) {
     if (l.find(needle) != std::string::npos) return true;
   }
   return false;
+}
+static int CountLogged(const std::string& needle) {
+  std::lock_guard<std::mutex> lk(g_logMu);
+  int n = 0;
+  for (const auto& l : g_log) {
+    if (l.find(needle) != std::string::npos) ++n;
+  }
+  return n;
 }
 static void ClearLog() {
   std::lock_guard<std::mutex> lk(g_logMu);
@@ -720,6 +739,19 @@ int main(int argc, char** argv) {
   rp::Frame(true);
   Check(Logged("rules: tech_pauses=2 tech_max_s=45 unpause=both force_ready=1 min_ready=0 forfeit_s=0"),
         "match rules survive the reload");
+
+  std::puts("-- team lock: a refused move is retried quietly, a landed one is logged once");
+  ClearLog();
+  g_players.back().team = 0;
+  g_refuseTeamChange = true;
+  Check(FramesUntil([] { return Logged("ready: could not move bob to T"); }, 3000), "a refused move is reported");
+  (void)FramesUntil([] { return false; }, 3000);  // a few more retries
+  Check(CountLogged("ready: could not move bob to T") == 1, "the refusal is reported once, not every retry");
+  Check(!Logged("ready: moved bob"), "a refused move is not logged as moved");
+  g_refuseTeamChange = false;
+  Check(FramesUntil([] { return Logged("ready: moved bob to T"); }, 3000), "the retry lands");
+  (void)FramesUntil([] { return false; }, 2000);
+  Check(CountLogged("ready: moved bob to T") == 1, "a landed move is logged once");
 
   std::puts("-- round restore: backups list, refusals, ru_pause_after_restore");
   ClearLog();

@@ -424,6 +424,12 @@ target_include_directories(readyup_practice_engine_spec_test PRIVATE ${CMAKE_SOU
 target_compile_options(readyup_practice_engine_spec_test PRIVATE -Wall -Wextra)
 add_test(NAME practice_engine_spec COMMAND readyup_practice_engine_spec_test)
 
+# Player headers of server log lines (core/src/readyup/log_header.h).
+add_executable(readyup_log_header_test tests/log_header_test.cpp)
+target_include_directories(readyup_log_header_test PRIVATE ${CMAKE_SOURCE_DIR}/core/src)
+target_compile_options(readyup_log_header_test PRIVATE -Wall -Wextra)
+add_test(NAME log_header COMMAND readyup_log_header_test)
+
 # One center panel per player (core/src/readyup/center_panel_owner.h).
 add_executable(readyup_center_panel_owner_test tests/center_panel_owner_test.cpp core/src/readyup/center_panel_owner.cpp)
 target_include_directories(readyup_center_panel_owner_test PRIVATE ${CMAKE_SOURCE_DIR}/core/src)
