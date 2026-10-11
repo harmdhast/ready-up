@@ -403,6 +403,16 @@ int main(int argc, char** argv) {
   std::puts("-- scrim warmup + .r");
   Check(FramesUntil([] { return Logged("state: mode=scrim_warmup"); }, 3000), "human on CT -> scrim_warmup");
   Check(g_suppressed.load() == 0, "no round-termination suppression in scrim warmup");
+  // A new map: its `Loading map` is the map change, its `Started map` the same load.
+  ClearCmds();
+  rp::PostLogLine("L 01/01/2026 - 00:00:01: Loading map \"de_other\"\n");
+  FramesUntil([] { return false; }, 1000);
+  rp::PostLogLine("L 01/01/2026 - 00:00:01: Started map \"de_other\" (CRC \"1\")\n");
+  FramesUntil([] { return false; }, 1500);
+  Check(CountPrefix("mp_roundtime 60") == 1, "new map in scrim warmup: the warmup rules go out once");
+  rp::PostLogLine("L 01/01/2026 - 00:00:01: Loading map \"de_test\"\n");
+  rp::PostLogLine("L 01/01/2026 - 00:00:01: Started map \"de_test\" (CRC \"1\")\n");
+  rp::Frame(true);
   Check(rp::TryDispatchChat(76561198000000001ull, "alice", ".r", 2), ".r dispatched");
   rp::Frame(true);
   Check(Has(Summary(), "\"ready\":{\"ready\":1,\"total\":1}"), "alice is ready (1/1)");
@@ -619,6 +629,15 @@ int main(int argc, char** argv) {
   Check(FramesUntil([] { return Has(Summary(), "\"ru_mode\":\"match_warmup\""); }, 2000), "mode match_warmup");
   Check(FramesUntil([] { return g_suppressed.load() == 1; }, 2000), "warmup suppresses round termination");
   Check(FramesUntil([] { return Sent("mp_autokick 0"); }, 2000) && !Sent("exec ReadyUp/warmup.cfg"), "match warmup without cfg exec: team damage kick off");
+  Check(FramesUntil([] { return Sent("mp_roundtime 7"); }, 3000), "match warmup rules applied");
+  // The changelevel onto the same map: CS2's gamemode cfg runs again over the warmup cvars.
+  ClearCmds();
+  rp::PostLogLine("L 01/01/2026 - 00:00:02: Loading map \"de_test\"\n");
+  Check(!FramesUntil([] { return Sent("mp_warmup_pausetimer 0"); }, 300), "same-map `Loading map`: nothing yet");
+  rp::PostLogLine("L 01/01/2026 - 00:00:02: Started map \"de_test\" (CRC \"1\")\n");
+  Check(FramesUntil([] { return Sent("mp_roundtime 7"); }, 3000), "same-map reload in match_warmup: warmup rules applied again");
+  FramesUntil([] { return false; }, 300);
+  Check(CountPrefix("mp_roundtime ") == 1, "same-map reload: the warmup rules go out once");
   rp::TryDispatchChat(76561198000000002ull, "bob", ".ready", 3);
   rp::Frame(true);
   Check(Has(Summary(), "\"ready\":{\"ready\":1,\"total\":2}"), "bob ready (1/2)");
