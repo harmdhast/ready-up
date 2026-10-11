@@ -199,6 +199,8 @@ struct Result {
   std::string output;
   bool haveOutput = false;
   bool deferred = false;  // exec: the reply comes after the output capture
+  Json data;              // cmd.result `result` (reset: what it ended)
+  bool haveData = false;
 };
 
 Result Ok() { return Result{}; }
@@ -226,6 +228,7 @@ void Reply(const std::string& ref, long long epoch, const Result& r, const std::
   }
   if (r.rev >= 0) p["rev"] = r.rev;
   if (r.haveOutput) p["output"] = r.output;
+  if (r.haveData) p["result"] = r.data;
   if (!auditId.empty()) p["audit_id"] = auditId;
   Send("cmd.result", p, epoch > 0 ? epoch : 0, true, ref);
 }
@@ -1129,6 +1132,7 @@ void ClearAssignment() {
   g_resume = fs::ResumePlan{};
   g_resumeActive = g_resumeSnapshotPending = g_resumeRestored = false;
   g_resumeRestoreAt = g_resumeUnpauseAt = -1;
+  g_deferredRestore = DeferredRestore{};  // a restore queued for the next round must not reach the next match
   g_backupScanAt = -1;
   g_liveSinceMs = -1;
   signals::SetEnabled(false);
@@ -1620,6 +1624,42 @@ Result CmdKick(const Json& args) {
   return Rejected("not_connected", "no connected player " + sid);
 }
 
+// cmd reset: whatever the server holds goes, so it can take the next match. The platform's
+// assignment, a match loaded with `ru match load`, or one startup recovery would restore: the same
+// as `ru match end` plus dropping the assignment. The platform settles its own match from the reply.
+Result CmdReset() {
+  const auto ctx = WebhookGetMatchContext();
+  const bool loaded = ctx && ctx->slug != "scrim";
+  const bool local = loaded && !CtxIsOurs(ctx);
+  std::string pending;
+  if (!loaded) {
+    if (const auto json = persisted_match_state::GetActiveMatchJson()) {
+      std::string err;
+      if (const auto saved = ParseWebhookMatchContextFromJson(*json, &err))
+        pending = saved->slug.empty() ? std::to_string(saved->matchid) : saved->slug;
+    }
+  }
+  const fs::ResetOutcome o = fs::PlanReset(g_asg.active, g_asg.match_id, local, local ? ctx->slug : "", pending);
+  if (local) WebhookEmitSeriesEnd(0, 0, "none", 0);
+  if (loaded) {
+    WebhookClearMatchContext();
+    (void)EndMatchResetServer();  // stops the demo and clears the match in state.json
+  } else if (!pending.empty()) {
+    persisted_match_state::ClearActiveMatch();
+  }
+  match_recovery::Cancel();
+  if (g_asg.active) {
+    SetPassword("");
+    ClearAssignment();
+  }
+  g_deferredRestore = DeferredRestore{};
+  Print("fleet: reset: ended %s%s%s\n", o.ended.c_str(), o.matchId.empty() ? "" : " ", o.matchId.c_str());
+  Result r;
+  r.data = fs::ResetResultJson(o);
+  r.haveData = true;
+  return r;
+}
+
 // A JSON scalar as the text a console setting takes (true -> "1").
 bool SettingText(const Json& v, std::string* out) {
   switch (v.type()) {
@@ -1771,7 +1811,8 @@ void OnCmd(const ru_fleet_msg* m) {
                                                    "restore_round", "restart_round", "restart_map", "end_match",
                                                    "end",        "change_map", "swap_teams"};
   const std::string mid = Str(p, "match_id");
-  if (kMatchCmds.count(name) || !mid.empty()) {
+  // reset ends whatever is there: never fenced to one match.
+  if (kMatchCmds.count(name) || (!mid.empty() && name != "reset")) {
     if (mid.empty()) {
       Reply(ref, epoch, Rejected("bad_request", name + " needs match_id and epoch"), auditId);
       return;
@@ -1822,6 +1863,12 @@ void OnCmd(const ru_fleet_msg* m) {
     r = CmdSwapTeams();
   } else if (name == "kick") {
     r = CmdKick(args);
+  } else if (name == "reset") {
+    r = CmdReset();
+    Reply(ref, epoch, r, auditId);
+    PublishState(Json());  // available again: server.availability
+    (void)SendSnapshot("request", false);
+    return;
   } else if (name == "settings.set") {
     r = CmdSettingsSet(args, by);
   } else if (name == "snapshot_now") {
@@ -1941,6 +1988,7 @@ void EnsureHandlers() {
   f->add_capability("match.backup.v1");
   f->add_capability("match.resume.v1");
   f->add_capability("match.backup_parts.v1");
+  f->add_capability("cmd.reset.v1");
   f->add_capability("maps.workshop.v1");
   f->add_capability("mode.wingman.v1");
   f->add_capability("mode.simulation.v1");
@@ -2058,6 +2106,18 @@ void Tick(double now) {
   RunDeferredRestore();
   const ru_fleet_v1* f = Fleet();
   CheckCs2Update(now, FleetActive(f));
+  // exec answers with its captured output, assigned or not.
+  for (auto it = g_execs.begin(); it != g_execs.end();) {
+    if (now < it->until) {
+      ++it;
+      continue;
+    }
+    Result r = Ok();
+    r.output = it->output;
+    r.haveOutput = true;
+    Reply(it->ref, it->epoch, r, it->auditId);
+    it = g_execs.erase(it);
+  }
   if (!g_asg.active) {
     (void)signals::Take();
     if (f && now - g_lastIdlePublish >= 1.0) {
@@ -2086,17 +2146,6 @@ void Tick(double now) {
     g_liveSinceMs = -1;
   } else if (g_liveSinceMs < 0) {
     g_liveSinceMs = FileClockMs(std::filesystem::file_time_type::clock::now());
-  }
-  for (auto it = g_execs.begin(); it != g_execs.end();) {
-    if (now < it->until) {
-      ++it;
-      continue;
-    }
-    Result r = Ok();
-    r.output = it->output;
-    r.haveOutput = true;
-    Reply(it->ref, it->epoch, r, it->auditId);
-    it = g_execs.erase(it);
   }
   if (g_backupScanAt >= 0 && now >= g_backupScanAt) {
     g_backupScanAt = -1;

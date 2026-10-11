@@ -987,6 +987,20 @@ static void TestAvailability() {
   CHECK_STR(a.detail, "cs2 update");
 }
 
+static void TestPlanReset() {
+  CHECK_STR(fs::ResetResultJson(fs::PlanReset(false, "", false, "", "")).Dump(), R"({"ended":"none","match_id":null})");
+  auto o = fs::PlanReset(true, "m1", true, "x", "");
+  CHECK_STR(o.ended, "assignment");
+  CHECK_STR(o.matchId, "m1");
+  o = fs::PlanReset(false, "", true, "cup-final", "");
+  CHECK_STR(o.ended, "local");
+  CHECK_STR(o.matchId, "cup-final");
+  o = fs::PlanReset(false, "", false, "", "cup-final");
+  CHECK_STR(o.ended, "local");
+  CHECK_STR(o.matchId, "cup-final");
+  CHECK_STR(fs::ResetResultJson(o).Dump(), R"({"ended":"local","match_id":"cup-final"})");
+}
+
 int main() {
   TestLiveStream();
   TestSubstitutes();
@@ -1002,6 +1016,7 @@ int main() {
   TestServerConfigPlan();
   TestBackupParts();
   TestAvailability();
+  TestPlanReset();
   if (g_failures) {
     std::fprintf(stderr, "fleet_state_test: %d of %d checks FAILED\n", g_failures, g_checks);
     return 1;
