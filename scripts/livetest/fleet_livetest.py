@@ -448,6 +448,15 @@ class Test:
         self.step("cmd reset on an idle server -> ok, ended none",
                   self.result_ok(res) and res["payload"].get("result") == {"ended": "none", "match_id": None},
                   json.dumps(res and res["payload"]))
+        res = self.cmd("kick", {"steamid64": "76561197960265728"}, match=False)
+        self.step("cmd kick without an assignment -> not_connected (not refused as a match cmd)",
+                  self.err_code(res) == "not_connected", self.err_code(res))
+        since = len(self.frames)
+        self.cmd("snapshot_now", {}, match=False)
+        snap = self.wait_frame("state.snapshot", since)
+        self.step("idle state.snapshot lists the connected players",
+                  bool(snap) and isinstance(snap["payload"].get("players"), list),
+                  json.dumps(snap and snap["payload"].get("players")))
         res = self.cmd("exec", {"command": "echo lt-idle-exec"}, match=False, root=True)
         self.step("cmd exec on an idle server -> ok with its output",
                   self.result_ok(res) and "lt-idle-exec" in (res["payload"].get("output") or ""),

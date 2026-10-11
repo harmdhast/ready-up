@@ -1212,4 +1212,52 @@ Json ResetResultJson(const ResetOutcome& o) {
   return p;
 }
 
+const char* CsTeamName(int csTeam) {
+  switch (csTeam) {
+    case 1:
+      return "spectator";
+    case 2:
+      return "t";
+    case 3:
+      return "ct";
+    default:
+      return "none";
+  }
+}
+
+Json PlayersJson(const std::vector<std::tuple<uint64_t, std::string, int>>& humans) {
+  Json out = Json::Array();
+  for (const auto& [sid, name, team] : humans) {
+    if (sid == 0 || out.Items().size() >= 64) continue;
+    Json p = Json::Object();
+    p["steamid64"] = std::to_string(sid);
+    p["name"] = name.substr(0, 128);
+    p["team"] = CsTeamName(team);
+    out.Push(std::move(p));
+  }
+  return out;
+}
+
+bool ValidateAddTime(const Json& args, const std::string& phase, bool roundOver, bool inFreeze, int* seconds,
+                     std::string* code, std::string* why) {
+  const Json* v = args.Find("seconds");
+  if (!v || v->type() != Json::Type::Int || v->AsInt() < 1 || v->AsInt() > 600) {
+    *code = "bad_args";
+    *why = "seconds must be a whole number from 1 to 600";
+    return false;
+  }
+  if (phase != "live" && phase != "overtime") {
+    *code = "bad_phase";
+    *why = "add_time works during a live round only";
+    return false;
+  }
+  if (roundOver || inFreeze) {
+    *code = "bad_phase";
+    *why = "no round in progress";
+    return false;
+  }
+  *seconds = static_cast<int>(v->AsInt());
+  return true;
+}
+
 }  // namespace readyup::fleetstate
