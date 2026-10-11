@@ -33,6 +33,7 @@
 #include "readyup/players.h"
 #include "readyup/round_restore.h"
 #include "readyup/scrim_flow.h"
+#include "readyup/stale_backups.h"
 #include "readyup/http_client.h"
 #include "readyup/webhook.h"
 #include "readyup/workers.h"
@@ -1193,6 +1194,13 @@ void OnAssign(const ru_fleet_msg* m) {
     g_resumeRestoreAt = g_resumeUnpauseAt = -1;
     g_resumeSnapshotPending = g_resumeRestored = false;
     g_restoring = resume.present && resume.round >= 1;
+    // Round backups an earlier match with this id left here (slugs repeat across tournaments)
+    // would otherwise be sent, and restored on a failover, as this match's rounds.
+    std::vector<std::string> stale;
+    stale_backups::RemoveRoundBackups(BackupDirs(), "readyup_backup_" + std::to_string(fs::NumericMatchId(mid)) + "_map",
+                                      &stale);
+    if (!stale.empty())
+      Print("fleet: removed %zu round backup(s) an earlier match %s left on disk\n", stale.size(), mid.c_str());
     if (resume.present && LocalMatchIs(mid)) {
       // This match is loaded already (still running here, or recovered after a crash): the
       // resume reloads it from the platform's state.
