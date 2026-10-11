@@ -854,7 +854,7 @@ platform, ephemeral). Capability `logs.v1`; without it the platform answers `uns
   `sv_setsteamaccount` token, `readyup_license_key`, fleet tokens (`rus_`, `rfk_`, `rhs_`, `rst_`,
   `RUE-`) and `Bearer` values.
 - Limits: ring of 200 lines; a line is at most 512 bytes (cut, then `…`); flushed every 0.25 s in
-  frames of at most 100 lines; at most 200 lines/s, the excess is counted in `dropped`. The
+  frames of at most 100 lines; at most 100 lines/s, the excess is counted in `dropped`. The
   platform keeps 200 lines per server and the console keeps 1000.
 
 ## 8. Server → platform messages

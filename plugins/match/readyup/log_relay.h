@@ -17,7 +17,7 @@ namespace readyup {
 constexpr size_t kLogRingLines = 200;
 constexpr size_t kLogLineMaxBytes = 512;
 constexpr size_t kLogBatchLines = 100;
-constexpr size_t kLogLinesPerSecond = 200;
+constexpr size_t kLogLinesPerSecond = 100;
 constexpr double kLogFlushS = 0.25;
 constexpr double kLogStreamTtlS = 90.0;
 

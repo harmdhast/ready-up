@@ -109,8 +109,8 @@ static void RateCapCountsDropped() {
     total += b->lines.size();
     dropped += b->dropped;
   }
-  CHECK(total == 200);
-  CHECK(dropped == 300);
+  CHECK(total == 100);
+  CHECK(dropped == 400);
 }
 
 static void ExpiresWithoutRenew() {
