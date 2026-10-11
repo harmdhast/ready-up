@@ -618,6 +618,7 @@ int main(int argc, char** argv) {
   }
   Check(FramesUntil([] { return Has(Summary(), "\"ru_mode\":\"match_warmup\""); }, 2000), "mode match_warmup");
   Check(FramesUntil([] { return g_suppressed.load() == 1; }, 2000), "warmup suppresses round termination");
+  Check(FramesUntil([] { return Sent("mp_autokick 0"); }, 2000) && !Sent("exec ReadyUp/warmup.cfg"), "match warmup without cfg exec: team damage kick off");
   rp::TryDispatchChat(76561198000000002ull, "bob", ".ready", 3);
   rp::Frame(true);
   Check(Has(Summary(), "\"ready\":{\"ready\":1,\"total\":2}"), "bob ready (1/2)");
@@ -796,9 +797,13 @@ int main(int argc, char** argv) {
     for (const char* exitCmd : exits) {
       ClearCmds();
       Check(loadMatch(++id), (std::string(exitCmd) + ": match loaded").c_str());
+      rp::Frame(true);
+      ClearCmds();
       rp::TryDispatchRu(true, 0, "Console", "ru match start force");
       rp::Frame(true);
       Check(CountPrefix("tv_record \"") == 1, (std::string(exitCmd) + ": the map's demo started").c_str());
+      Check(Sent("mp_autokick 0") && !Sent("exec ReadyUp/live.cfg"),
+            (std::string(exitCmd) + ": go-live without cfg exec: team damage kick off").c_str());
       rp::TryDispatchRu(true, 0, "Console", "ru match start force");
       rp::Frame(true);
       Check(CountPrefix("tv_record \"") == 1, (std::string(exitCmd) + ": starting again does not start a second file").c_str());

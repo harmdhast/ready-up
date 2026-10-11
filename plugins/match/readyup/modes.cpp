@@ -769,6 +769,8 @@ static void ApplyWarmupRulesLocked(State& st) {
   if (EnqueueServerCommand(respawnT.c_str())) any = true;
   if (EnqueueServerCommand(ignoreWin.c_str())) any = true;
   if (EnqueueServerCommand("mp_freezetime 0")) any = true;
+  // Team damage / team kills must not kick anyone (warmup.cfg sets it in cfg mode).
+  if (EnqueueServerCommand("mp_autokick 0")) any = true;
   // Extend buy period during freeplay warmup.
   if (EnqueueServerCommand("mp_buytime 9999")) any = true;
   if (EnqueueServerCommand(roundTime.c_str())) any = true;
@@ -815,6 +817,7 @@ static void ApplyScrimWarmupRulesLocked(State& st) {
   const char* cmds[] = {
       "mp_autoteambalance 0",
       "mp_limitteams 0",
+      "mp_autokick 0",
       // Ending CS2 warmup restarts the round, which plays the team intro and
       // covers Ready Up HTML; skip it.
       "mp_team_intro_time 0",
@@ -1012,6 +1015,7 @@ static void ApplyLiveRulesAndRestartLocked(State& st, const WebhookMatchContext&
         "mp_maxmoney 16000",
         "mp_autoteambalance 0",
         "mp_limitteams 0",
+        "mp_autokick 0",
     };
     for (const char* c : cmds) {
       if (EnqueueServerCommand(c)) any = true;
