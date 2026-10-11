@@ -139,7 +139,8 @@ Choices made where this document leaves room:
 - Round backups: CS2 writes `readyup_backup_<matchid>_map<N>__roundNN.txt` to `csgo/readyup/`
   (NN = rounds played; `InlineBackup.round` = NN + 1, the round it starts). The bridge forwards a
   file 1.5 s after each round start, again when its content changes (a replayed round after a
-  restore), in 384 KiB parts. `cmd restore_round` loads a local file or an inline one (sha256 and
+  restore), in 384 KiB parts. After a failover resume, files of rounds before the resume round
+  (the go-live round's `round00`) are not forwarded: those rounds were played on the old server. `cmd restore_round` loads a local file or an inline one (sha256 and
   size checked, written next to CS2's own backups), rewinds the stats model
   (`stats::RewindTo`), the round counters and scores, ignores the draw round end the reload
   causes, pauses and emits `rounds_voided` + `match_restored`.
