@@ -280,6 +280,8 @@ bool ValidateAssign(const Json& payload, std::string* err) {
   if (!IsInt(payload.Find("epoch")) || payload.Find("epoch")->AsInt() < 1) return fail("epoch must be an integer >= 1");
   const Json* cfg = Obj(payload, "config");
   if (!cfg) return fail("config must be an object");
+  if (const Json* id = cfg->Find("id"); id && (!IsInt(id) || id->AsInt() < 1 || id->AsInt() >= (1ll << 52)))
+    return fail("id must be an integer 1..2^52-1");
   const long long numMaps = Int(*cfg, "num_maps", 0);
   if (numMaps < 1 || numMaps > 9) return fail("num_maps must be 1..9");
   const Json* maps = Arr(*cfg, "maps");
@@ -333,9 +335,14 @@ unsigned long long NumericMatchId(const std::string& matchId) {
   return h ? h : 1;
 }
 
+unsigned long long AssignMatchId(const std::string& matchId, const Json& config) {
+  const long long id = Int(config, "id", 0);
+  return id > 0 ? static_cast<unsigned long long>(id) : NumericMatchId(matchId);
+}
+
 Json AssignToMatConfig(const std::string& matchId, const Json& config, std::vector<std::string>* dropped) {
   Json cfg = Json::Object();
-  cfg["matchid"] = static_cast<long long>(NumericMatchId(matchId));
+  cfg["matchid"] = static_cast<long long>(AssignMatchId(matchId, config));
   cfg["num_maps"] = Int(config, "num_maps", 1);
   Json maplist = Json::Array();
   Json sides = Json::Array();

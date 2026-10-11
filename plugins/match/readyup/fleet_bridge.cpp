@@ -244,8 +244,10 @@ const Json* Path(const Json& o, std::initializer_list<const char*> keys) {
 }
 Json Copy(const Json* v) { return v ? *v : Json(); }
 
+unsigned long long AsgMatchId() { return fs::AssignMatchId(g_asg.match_id, g_config); }
+
 bool CtxIsOurs(const std::optional<WebhookMatchContext>& ctx) {
-  return g_asg.active && ctx && ctx->matchid == fs::NumericMatchId(g_asg.match_id);
+  return g_asg.active && ctx && ctx->matchid == AsgMatchId();
 }
 
 // A real match that did not come from the platform (`ru match load`): new assignments are busy.
@@ -257,7 +259,7 @@ bool LocalMatchActive() {
 // The loaded match (e.g. recovered from state.json after a crash) is `matchId`'s.
 bool LocalMatchIs(const std::string& matchId) {
   const auto ctx = WebhookGetMatchContext();
-  return ctx && ctx->slug != "scrim" && ctx->matchid == fs::NumericMatchId(matchId);
+  return ctx && ctx->slug != "scrim" && ctx->slug == matchId;
 }
 
 // hello.admins_rev / state.snapshot.admins_rev: the admins.set rev cached in fleet-admins.json.
@@ -709,11 +711,11 @@ void EmitAll(const Json& st, std::vector<Ev>& evs) {
 
 // ---------------------------------------------------------------------------- round backups
 
-std::string BackupPrefixFor(const std::string& matchId, int mapNumber) {
-  return "readyup_backup_" + std::to_string(fs::NumericMatchId(matchId)) + "_map" +
+std::string BackupPrefixFor(unsigned long long matchId, int mapNumber) {
+  return "readyup_backup_" + std::to_string(matchId) + "_map" +
          std::to_string(std::max(1, mapNumber)) + "_";
 }
-std::string BackupPrefix(int mapNumber) { return BackupPrefixFor(g_asg.match_id, mapNumber); }
+std::string BackupPrefix(int mapNumber) { return BackupPrefixFor(AsgMatchId(), mapNumber); }
 
 // Where CS2 writes and reads its round backups (backup_files.h). Any thread.
 std::vector<std::string> BackupDirs() { return backup_files::BackupDirs(); }
@@ -862,10 +864,10 @@ Result WriteBackupFile(const std::string& name, const std::string& raw) {
 // A resume's backup (inline, a named local file, or this match's own file for map / round) as
 // readyup_resume_<id>_map<N>_round<NN>.txt: a name CS2's own round backups never overwrite and the
 // backup scan never forwards. Sets plan->file / sha256.
-Result PrepareResumeBackup(const std::string& matchId, fs::ResumePlan* plan) {
+Result PrepareResumeBackup(unsigned long long matchId, fs::ResumePlan* plan) {
   char nn[16];
   std::snprintf(nn, sizeof(nn), "%02d", std::max(0, plan->round - 1));
-  const std::string dest = "readyup_resume_" + std::to_string(fs::NumericMatchId(matchId)) + "_map" +
+  const std::string dest = "readyup_resume_" + std::to_string(matchId) + "_map" +
                            std::to_string(plan->map_number) + "_round" + nn + ".txt";
   std::string raw;
   if (plan->inline_backup) {
@@ -1150,7 +1152,7 @@ void OnAssign(const ru_fleet_msg* m) {
     return;
   }
   if (resume.present && resume.round >= 1) {
-    const Result r = PrepareResumeBackup(mid, &resume);
+    const Result r = PrepareResumeBackup(fs::AssignMatchId(mid, *p.Find("config")), &resume);
     if (r.status != "ok") {
       Reply(ref, epoch, r);
       return;
@@ -1295,7 +1297,7 @@ bool DropRecoveredCopy(const std::string& mid, long long epoch, const std::strin
   } else if (const auto json = persisted_match_state::GetActiveMatchJson()) {
     std::string err;
     const auto ctx = ParseWebhookMatchContextFromJson(*json, &err);
-    if (ctx && ctx->matchid == fs::NumericMatchId(mid)) {
+    if (ctx && ctx->slug == mid) {
       persisted_match_state::ClearActiveMatch();  // not recovered yet: now there is nothing to recover
       saved = true;
     }
@@ -1921,7 +1923,7 @@ void OnDemo(const demo::DemoEvent& e) {
 static bool StreamDemoBegin(const demo::RecordingInfo& info, const std::string& absPath, const std::string&) {
   const ru_fleet_v1* f = Fleet();
   if (!FleetActive(f) || !FLEET_HAS(f, demo_stream_begin) || !f->demo_stream_begin) return false;
-  if (!g_asg.active || info.matchid != static_cast<long long>(fs::NumericMatchId(g_asg.match_id))) return false;
+  if (!g_asg.active || info.matchid != static_cast<long long>(AsgMatchId())) return false;
   Json spec = Json::Object();
   spec["match_id"] = g_asg.match_id;
   spec["epoch"] = g_asg.epoch;

@@ -300,6 +300,23 @@ static void TestAssign() {
   CHECK(fs::NumericMatchId("abc") != 0 && fs::NumericMatchId("abc") < (1ull << 52));
   CHECK(fs::NumericMatchId("abc") == fs::NumericMatchId("abc"));
 
+  // config.id (the platform's match number) names the match where slugs repeat.
+  {
+    Json withId = p;
+    withId["config"]["id"] = 4242LL;
+    CHECK(fs::ValidateAssign(withId, &err));
+    CHECK(fs::AssignMatchId("ko-r1-m3", *withId.Find("config")) == 4242);
+    CHECK(fs::AssignMatchId("ko-r1-m3", *p.Find("config")) == fs::NumericMatchId("ko-r1-m3"));
+    auto idCtx = ParseWebhookMatchContextFromJson(fs::AssignToMatConfig("ko-r1-m3", *withId.Find("config"), nullptr).Dump(), &err);
+    CHECK(idCtx && idCtx->matchid == 4242 && idCtx->slug == "ko-r1-m3");
+    withId["config"]["id"] = 0LL;
+    CHECK(!fs::ValidateAssign(withId, &err));
+    withId["config"]["id"] = 1LL << 52;
+    CHECK(!fs::ValidateAssign(withId, &err));
+    withId["config"]["id"] = "4242";
+    CHECK(!fs::ValidateAssign(withId, &err));
+  }
+
   // Hand-over membership (D16).
   const Json& cfg = *p.Find("config");
   CHECK(fs::InAssignedMatch(cfg, 76561198000000001ull));
