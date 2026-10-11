@@ -64,6 +64,16 @@ bool GoLiveTriggered();
 void SetRecoveryGate(bool enabled);
 bool RecoveryGateEnabled();
 
+// Scrim / match warmup (not the recovery gate, no go-live pending): the warmup rules go out again
+// on the next Tick() (warmup_score.h: a round was scored, so they were lost).
+void ReapplyWarmupRules();
+
+// The map of this warmup is loaded (Tick saw the map change, or a round started in match warmup:
+// also a reload of the same map). ModesAwaitMapLoad: a map load is on its way (match load); until
+// then the warmup is still on the last map, with its score.
+bool WarmupMapReady();
+void ModesAwaitMapLoad();
+
 // Called when a match config is loaded successfully (seeds roster + enters warmup).
 void OnMatchLoaded();
 
@@ -96,7 +106,8 @@ void ModesOnMapLoaded();
 void ModesOnHumanJoinedTeam(int team);
 
 // Map/series end (match_end.cpp, game thread, outside the modes mutex):
-// - ModesBeginNextMapWarmup: postgame -> match warmup for the next map of the series.
+// - ModesBeginNextMapWarmup: postgame -> match warmup for the next map of the series (not
+//   WarmupMapReady until it loads).
 // - ModesFinishSeriesResetToIdle: unload the match (context, persisted state, stats) and go idle.
 void ModesBeginNextMapWarmup();
 void ModesFinishSeriesResetToIdle();

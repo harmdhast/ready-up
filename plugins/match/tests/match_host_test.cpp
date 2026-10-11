@@ -21,6 +21,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdarg>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -114,6 +115,15 @@ static std::vector<FakePlayer> g_players = {
     {2, 2, 76561198000000001ull, 3, false, "alice"},
 };
 static std::atomic<int> g_suppressed{-1};
+// One CS2 team entity (cs_team_manager, CTeam::m_iScore) at entity index kTeamIndex. The entity
+// system is up only while g_teamsUp is set.
+struct FakeTeam {
+  unsigned char pad[0x40];
+  int32_t score;
+};
+static FakeTeam g_team{};
+static std::atomic<bool> g_teamsUp{false};
+constexpr int kTeamIndex = 70;
 
 static void FillPlayer(ru_player* out, const FakePlayer& p) {
   ru_player r{};
@@ -171,12 +181,26 @@ void FillEngineApi(ru_api* a) {
   a->ev_get_player_slot = [](ru_plugin*, const ru_game_event*, const char*) { return -1; };
   a->ev_get_player_controller = [](ru_plugin*, const ru_game_event*, const char*) -> void* { return nullptr; };
   a->ev_get_player_pawn = [](ru_plugin*, const ru_game_event*, const char*) -> void* { return nullptr; };
-  a->schema_offset = [](ru_plugin*, const char*, const char*) { return -1; };
-  a->entity_system_status = [](ru_plugin*) { return static_cast<int>(RU_ENTSYS_PENDING); };
-  a->entity_by_index = [](ru_plugin*, int) -> void* { return nullptr; };
-  a->entity_from_handle = [](ru_plugin*, uint32_t) -> void* { return nullptr; };
-  a->entity_handle_of = [](ru_plugin*, void*) { return 0xFFFFFFFFu; };
-  a->entity_classname = [](ru_plugin*, void*) -> const char* { return nullptr; };
+  a->schema_offset = [](ru_plugin*, const char* cls, const char* field) {
+    const std::string f = std::string(cls) + "." + field;
+    if (f == "CTeam.m_iScore") return static_cast<int>(offsetof(FakeTeam, score));
+    // warmup_money / weapon_cleanup / coach: present (no entity they look at exists).
+    if (f == "CCSPlayerController.m_pInGameMoneyServices" || f == "CCSPlayerController_InGameMoneyServices.m_iAccount" ||
+        f == "CBaseEntity.m_hOwnerEntity" || f == "CCSPlayerController.m_iTeamNum" ||
+        f == "CCSPlayerController.m_iCoachingTeam") {
+      return 0;
+    }
+    return -1;
+  };
+  a->entity_system_status = [](ru_plugin*) {
+    return static_cast<int>(g_teamsUp.load() ? RU_ENTSYS_OK : RU_ENTSYS_PENDING);
+  };
+  a->entity_by_index = [](ru_plugin*, int i) -> void* { return g_teamsUp.load() && i == kTeamIndex ? &g_team : nullptr; };
+  a->entity_from_handle = [](ru_plugin*, uint32_t h) -> void* {
+    return g_teamsUp.load() && h == kTeamIndex ? &g_team : nullptr;
+  };
+  a->entity_handle_of = [](ru_plugin*, void* e) { return e == &g_team ? static_cast<uint32_t>(kTeamIndex) : 0xFFFFFFFFu; };
+  a->entity_classname = [](ru_plugin*, void* e) -> const char* { return e == &g_team ? "cs_team_manager" : nullptr; };
   a->entity_mark_changed = [](ru_plugin*, void*) { return 0; };
   a->econ_attr_set_by_name = [](ru_plugin*, void*, const char*, double) { return 0; };
   a->entity_change_subclass = [](ru_plugin*, void*, const char*) { return 0; };
@@ -403,6 +427,16 @@ int main(int argc, char** argv) {
   std::puts("-- scrim warmup + .r");
   Check(FramesUntil([] { return Logged("state: mode=scrim_warmup"); }, 3000), "human on CT -> scrim_warmup");
   Check(g_suppressed.load() == 0, "no round-termination suppression in scrim warmup");
+  // A score in scrim warmup: the scrim warmup rules go out again, and they restart the game themselves.
+  Check(FramesUntil([] { return Sent("mp_roundtime 60"); }, 2000), "scrim warmup rules applied");
+  ClearCmds();
+  g_teamsUp = true;
+  g_team.score = 2;
+  Check(FramesUntil([] { return Sent("mp_roundtime 60"); }, 2000), "scrim warmup, a team has a score: warmup rules sent again");
+  FramesUntil([] { return false; }, 300);
+  Check(CountPrefix("mp_restartgame") == 1, "scrim warmup, a team has a score: one mp_restartgame (the rules')");
+  g_team.score = 0;
+  g_teamsUp = false;
   // A new map: its `Loading map` is the map change, its `Started map` the same load.
   ClearCmds();
   rp::PostLogLine("L 01/01/2026 - 00:00:01: Loading map \"de_other\"\n");
@@ -600,6 +634,8 @@ int main(int argc, char** argv) {
   std::thread http;
   const int port = ServeOnce(body, &http);
   Check(port > 0, "test http server up");
+  // The last map's score is still up when the match loads (onto the map the server is on).
+  g_team.score = 13;
   ClearLog();
   ClearCmds();
   Check(rp::TryDispatchRu(true, 0, "Console", "ru match load http://127.0.0.1:" + std::to_string(port) + "/m.json"),
@@ -629,7 +665,13 @@ int main(int argc, char** argv) {
   Check(FramesUntil([] { return Has(Summary(), "\"ru_mode\":\"match_warmup\""); }, 2000), "mode match_warmup");
   Check(FramesUntil([] { return g_suppressed.load() == 1; }, 2000), "warmup suppresses round termination");
   Check(FramesUntil([] { return Sent("mp_autokick 0"); }, 2000) && !Sent("exec ReadyUp/warmup.cfg"), "match warmup without cfg exec: team damage kick off");
-  Check(FramesUntil([] { return Sent("mp_roundtime 7"); }, 3000), "match warmup rules applied");
+  // CS2 credits a round before it calls TerminateRound, which match warmup drops: a win condition
+  // that holds (the round timer at 0:00 once the warmup cvars are gone) scores on every tick.
+  Check(FramesUntil([] { return Sent("mp_roundtime 7"); }, 2000), "match warmup rules applied");
+  ClearCmds();
+  g_teamsUp = true;
+  Check(!FramesUntil([] { return Sent("mp_restartgame 1"); }, 300),
+        "match warmup before its map loads: the last map's score is not reset");
   // The changelevel onto the same map: CS2's gamemode cfg runs again over the warmup cvars.
   ClearCmds();
   rp::PostLogLine("L 01/01/2026 - 00:00:02: Loading map \"de_test\"\n");
@@ -638,6 +680,26 @@ int main(int argc, char** argv) {
   Check(FramesUntil([] { return Sent("mp_roundtime 7"); }, 3000), "same-map reload in match_warmup: warmup rules applied again");
   FramesUntil([] { return false; }, 300);
   Check(CountPrefix("mp_roundtime ") == 1, "same-map reload: the warmup rules go out once");
+  Check(FramesUntil([] { return Sent("mp_restartgame 1"); }, 2000),
+        "same-map match load: a score once the map has loaded is reset");
+  ClearCmds();
+  FramesUntil([] { return Sent("mp_roundtime 7"); }, 2000);  // the warmup rules that go with it
+  g_team.score = 0;
+  g_teamsUp = false;
+  ClearCmds();
+  g_teamsUp = true;
+  Check(!FramesUntil([] { return Sent("mp_restartgame 1") || Sent("mp_roundtime 7"); }, 300),
+        "match warmup, no score: no restart, warmup rules not sent again");
+  g_team.score = 37;
+  Check(FramesUntil([] { return Sent("mp_restartgame 1"); }, 4000),
+        "match warmup, a team has a score: mp_restartgame 1 (score back to 0, everyone respawns)");
+  // The score means the warmup rules were lost (gamemode_competitive.cfg ran again): they go out again.
+  Check(FramesUntil([] { return Sent("mp_ignore_round_win_conditions 1") && Sent("mp_roundtime 7"); }, 2000),
+        "match warmup, a team has a score: warmup rules sent again");
+  ClearCmds();
+  Check(!FramesUntil([] { return Sent("mp_restartgame 1"); }, 500), "one restart at a time");
+  g_team.score = 0;
+  g_teamsUp = false;
   rp::TryDispatchChat(76561198000000002ull, "bob", ".ready", 3);
   rp::Frame(true);
   Check(Has(Summary(), "\"ready\":{\"ready\":1,\"total\":2}"), "bob ready (1/2)");

@@ -31,6 +31,7 @@ set(MATCH_SOURCES
   readyup/host.cpp
   readyup/idle_refresh.cpp
   readyup/warmup_money.cpp
+  readyup/warmup_score.cpp
   readyup/weapon_cleanup.cpp
   readyup/hud_steady.cpp
   readyup/knife_tracker.cpp
@@ -142,8 +143,9 @@ target_compile_options(match_cs2_update_test PRIVATE -Wall -Wextra)
 add_test(NAME match_cs2_update COMMAND match_cs2_update_test)
 
 # Pause limits / unpause rule / auto-unpause countdown, .forceready threshold, team name
-# sanitizing, the team-left forfeit timer, warmup money and the warmup weapon cleanup (its cvars
-# against cfg/ReadyUp/*.cfg) (readyup/match_rules.h, weapon_cleanup.h; ctest `match_rules`).
+# sanitizing, the team-left forfeit timer, warmup money, the warmup score reset and the warmup
+# weapon cleanup (its cvars against cfg/ReadyUp/*.cfg) (readyup/match_rules.h, warmup_score.h,
+# weapon_cleanup.h; ctest `match_rules`).
 add_executable(match_rules_test tests/match_rules_test.cpp readyup/match_rules.cpp)
 target_include_directories(match_rules_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_options(match_rules_test PRIVATE -Wall -Wextra)

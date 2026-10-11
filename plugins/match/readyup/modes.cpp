@@ -111,6 +111,9 @@ struct State {
   // A map load was logged (ModesOnMapLoaded): also a reload of lastSeenMap.
   bool mapLoaded = false;
 
+  // The map of this warmup is loaded: false from a match load or next-map warmup until its map
+  // change or its first round start shows up (warmup_score.h).
+  bool warmupMapReady = true;
 
   // Best-effort warmup rules + transition into live.
   bool warmupRulesApplied = false;
@@ -1401,6 +1404,27 @@ bool GoLiveTriggered() {
   return st.startTriggered;
 }
 
+void ReapplyWarmupRules() {
+  auto& st = St();
+  std::lock_guard<std::mutex> lk(st.mu);
+  if (st.mode != ReadyUpMode::ScrimWarmup && st.mode != ReadyUpMode::MatchWarmup) return;
+  if (st.recoveryGate || st.startTriggered) return;
+  st.warmupRulesApplied = false;
+  st.lastGateCmd = {};
+}
+
+bool WarmupMapReady() {
+  auto& st = St();
+  std::lock_guard<std::mutex> lk(st.mu);
+  return st.warmupMapReady;
+}
+
+void ModesAwaitMapLoad() {
+  auto& st = St();
+  std::lock_guard<std::mutex> lk(st.mu);
+  st.warmupMapReady = false;
+}
+
 void OnMatchLoaded() {
   MatchEndCancelPending();
   ClearMapStats();
@@ -1447,6 +1471,9 @@ void OnMatchRoundStarted() {
   auto& st = St();
   std::lock_guard<std::mutex> lk(st.mu);
   if (st.mode != ReadyUpMode::MatchWarmup) return;
+  // A round started after the match load / next map's changelevel: the warmup's map is up, also
+  // when it is the map the server was already on.
+  st.warmupMapReady = true;
 
   // When warmup gating is enabled, a map's initial Round_Start (or other spurious
   // round starts) should NOT automatically mark the match as live. Only transition
@@ -1906,6 +1933,7 @@ void ModesBeginNextMapWarmup() {
   st.ready.clear();
   st.lastUi.clear();
   st.warmupRulesApplied = false;
+  st.warmupMapReady = false;
   st.startTriggered = false;
   st.lifecycleMapNumber = 0;
   st.warmupEndedSent = false;
@@ -2360,6 +2388,7 @@ void Tick() {
     if (!ms.current_map.empty() && (ms.current_map != st.lastSeenMap || st.mapLoaded)) {
       st.lastSeenMap = ms.current_map;
       st.mapLoaded = false;
+      st.warmupMapReady = true;
       // Force re-application of cfg-driven baselines on the new map.
       st.idleCfgExecuted = false;
       st.idleIgnoreWinSent = -1;

@@ -351,6 +351,15 @@ chat_prefix="<Green>[PUG #1]<Default>"
   `mp_warmup_pausetimer 0` on map start, and ends CS2's warmup whenever the server logs
   `World triggered "Warmup_Start"` (or fires `round_announce_warmup`) while idle, in
   scrim/match warmup or in the knife round.
+- No round counts in warmup. CS2 scores a round before it ends it, and match warmup holds the
+  round end back, so a round that would end (the round timer at 0:00 or a team eliminated, once
+  the warmup rules are lost) scores on every tick. In scrim and match warmup a team score above
+  0 sends the warmup rules again and `mp_restartgame 1` (scrim warmup rules include it): the
+  score goes back to 0, everyone respawns, warmup money stays. Not before the warmup's map has
+  loaded (a match load or the next map keeps the last map's score until its map change or its
+  first round start, also onto the same map), not in
+  the recovery gate of a restored match (its score is the backup's), not once go-live is under
+  way.
 - Warmup can run for hours, so nothing piles up on the ground: in scrim and match warmup
   nothing drops on death (`mp_death_drop_gun/grenade/defuser/taser 0`) and there is no bomb
   (`mp_give_player_c4 0`: nobody can plant, warmup never ends a round). Both are sent with the
