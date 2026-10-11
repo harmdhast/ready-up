@@ -93,6 +93,8 @@ bool g_restoring = false;
 bool g_seriesOver = false;   // series_end seen for this assignment
 bool g_serverReset = false;  // the match flow unloaded the finished match (ServerReset)
 int g_latestBackupRound = -1;
+// A failover resume's map and round: this server forwards no backup of an earlier round there.
+int g_firstBackupMap = 0, g_firstBackupRound = 1;
 Json g_lastLive;  // the match flow's last view of the assigned match (kept once it is unloaded)
 bool g_pauseSeen = false;
 std::string g_phaseReason;
@@ -720,7 +722,7 @@ std::string BackupPrefix(int mapNumber) { return BackupPrefixFor(g_asg.match_id,
 std::vector<std::string> BackupDirs() { return backup_files::BackupDirs(); }
 
 // Worker thread: forwards backup files with `prefix` that were not sent yet.
-void ScanBackups(std::string prefix, int mapNumber, int team1, int team2) {
+void ScanBackups(std::string prefix, int mapNumber, int team1, int team2, int firstRound) {
   struct Found {
     std::string name, path, key;
     int round;
@@ -733,7 +735,7 @@ void ScanBackups(std::string prefix, int mapNumber, int team1, int team2) {
       const std::string fn = it.path().filename().string();
       if (fn.compare(0, prefix.size(), prefix) != 0 || it.path().extension() != ".txt") continue;
       const int r = fs::BackupRoundFromName(fn);
-      if (r < 0) continue;
+      if (r < 0 || !fs::ForwardsBackup(r, firstRound)) continue;
       const std::string key = BackupKey(it.path());
       std::lock_guard<std::mutex> lk(g_backupMu);
       if (g_sentBackups.count(key)) continue;
@@ -802,7 +804,8 @@ void RunBackupScan() {
       t2 = stats::Current().Team2Score();
     }
   }
-  workers::Spawn("fleet-backup", [prefix, mapNumber, t1, t2] { ScanBackups(prefix, mapNumber, t1, t2); });
+  const int first = mapNumber == g_firstBackupMap ? g_firstBackupRound : 1;
+  workers::Spawn("fleet-backup", [prefix, mapNumber, t1, t2, first] { ScanBackups(prefix, mapNumber, t1, t2, first); });
 }
 
 // Finds a local backup file for `round` (1-based: the round it starts) on `mapNumber`; *dir = its
@@ -1081,6 +1084,8 @@ void ClearAssignment() {
   g_stream.Reset(Json(), 0);
   g_handOverPending = g_loading = g_restoring = g_seriesOver = g_serverReset = false;
   g_latestBackupRound = -1;
+  g_firstBackupMap = 0;
+  g_firstBackupRound = 1;
   g_lastLive = Json();
   g_pauseSeen = false;
   g_execs.clear();
@@ -1201,6 +1206,8 @@ void OnAssign(const ru_fleet_msg* m) {
                                       &stale);
     if (!stale.empty())
       Print("fleet: removed %zu round backup(s) an earlier match %s left on disk\n", stale.size(), mid.c_str());
+    g_firstBackupMap = resume.present ? resume.map_number : 0;
+    g_firstBackupRound = resume.present ? std::max(1, resume.round) : 1;
     if (resume.present && LocalMatchIs(mid)) {
       // This match is loaded already (still running here, or recovered after a crash): the
       // resume reloads it from the platform's state.
@@ -2099,6 +2106,9 @@ void Tick(double now) {
       if (g_resumeActive) {
         g_resumeActive = false;
         g_resumeSnapshotPending = true;
+      } else if (s.map_number == g_firstBackupMap && s.round >= 1) {
+        // A restore_round before the resume round replays those rounds here.
+        g_firstBackupRound = std::min(g_firstBackupRound, s.round);
       }
     } else if (s.type == "knife_result") {
       const KnifeHudInfo k = KnifeHudSnapshot();
@@ -2185,6 +2195,8 @@ Json SnapshotJson() {
   j["series_over"] = g_seriesOver;
   j["server_reset"] = g_serverReset;
   j["latest_backup_round"] = g_latestBackupRound;
+  j["first_backup_map"] = g_firstBackupMap;
+  j["first_backup_round"] = g_firstBackupRound;
   j["last_live"] = g_lastLive;
   Json sent = Json::Array();
   {
@@ -2214,6 +2226,8 @@ void RestoreJson(const Json& j) {
   g_seriesOver = Bool(j, "series_over");
   g_serverReset = Bool(j, "server_reset");
   g_latestBackupRound = static_cast<int>(Int(j, "latest_backup_round", -1));
+  g_firstBackupMap = static_cast<int>(Int(j, "first_backup_map", 0));
+  g_firstBackupRound = static_cast<int>(Int(j, "first_backup_round", 1));
   g_lastLive = j.Find("last_live") ? *j.Find("last_live") : Json();
   if (const Json* s = j.Find("sent_backups")) {
     std::lock_guard<std::mutex> lk(g_backupMu);
