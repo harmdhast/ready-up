@@ -166,7 +166,7 @@ appended struct fields); bookkeeping members in `plugin_loader.cpp`, `feature_st
 | Member | Thread | Purpose |
 |---|---|---|
 | `log_untagged(self, level, msg)` | any | `[ReadyUp] <msg>` without the `plugin[name]: ` tag, for log formats tools already parse (`state:`, `knife:`) |
-| `register_chat_command_ex(self, name, flags, fn, user)` | game | chat command with `RU_CMD_HIDE`: the core swallows the sender's line in its ClientCommand hook, before the engine prints it |
+| `register_chat_command_ex(self, name, flags, fn, user)` | game | chat command with `RU_CMD_HIDE`: the core swallows the sender's line in its Host_Say hook, before the engine prints it |
 | `register_console_command_ex(self, name, flags, fn, user)` | game | console command with `RU_CMD_OBSERVE`: the plugin sees the line, the engine still runs it (e.g. `tv_delay 5`). Observers never conflict |
 | `register_ru_subcommand(self, name, fn, user)` | game | `ru <name> ...` (console / RCON) and `.ru <name> ...` (chat) both reach fn; argv[0] is `ru` / `.ru`. The core's subcommands (`help`, `plugin`, `version`, `selftest`, `sigtest`, `reload`, `status_http`, and `license` since 1.9) are reserved |
 | `on_frame(self, fn, user)` | game | every GameFrame, simulating or not (`ru_tick_info.simulating`), after `on_tick`. For timers that must fire while the server does not simulate |
@@ -175,9 +175,13 @@ appended struct fields); bookkeeping members in `plugin_loader.cpp`, `feature_st
 
 Struct fields: `ru_tick_info.simulating`, `ru_player.userid` (the log `<N>`, what `kickid` takes).
 
-**Sender slot.** Chat commands now carry the sender's slot from the ClientCommand hook (it used
-to be looked up again from the SteamID when the command was delivered). The hook routes every
+**Sender slot.** Chat commands now carry the sender's slot from the Host_Say hook's controller (it
+used to be looked up again from the SteamID when the command was delivered). The hook routes every
 plugin-owned chat command, not only `.ru` / `.r`; the log listener's copy of the line is deduped.
+The sender's identity (SteamID / name per slot) still comes from the game log (`log on`):
+`GetSlotIdentity` is filled by the log listener. Since CS2 1.41.9.0 chat no longer reaches
+ClientCommand as `say`; the ClientCommand hook runs the same shared handler only on builds that
+still send chat there.
 
 **Still not in the API: `terminate_round`.** Calling `CCSGameRules::TerminateRound` needs the
 game rules pointer and a verified calling convention for the float/reason arguments; neither is
@@ -450,7 +454,8 @@ vendored code in `third_party/`, the non-engine helpers in `libs/readyup/`, the 
 | `exports.cpp`, `real_server.*`, `path.*`, `disabled.*`, `banner.*`, `version.h`, `cs2_version.*` | shim, loading |
 | `engine_surface.*`, `engine_surface_core.*`, `signature_scan.*`, `sigtest.*`, `sdk/*` | engine surface |
 | `game_frame_hook.*`, `host_say_hook.*`, `client_command_hook.*`, `round_termination_hook.*`, `console_command.*` | hooks (`console_command` is a probe and can go) |
-| `server_game_clients_hook.*` | the ClientCommand hook: routes plugin chat commands with the sender slot (`RU_CMD_HIDE` swallows the line) and relays chat name prefixes plugins set (match sets the admin / captain ones) |
+| `server_game_clients_hook.*` | the ClientCommand hook: runs the shared chat handler for `say` / `say_team` on builds that still send chat there |
+| `chat_intercept.*`, `chat_rules.*` | the shared chat handler the Host_Say hook runs before the engine: routes plugin chat commands with the sender slot (`RU_CMD_HIDE` swallows the line) and relays chat name prefixes plugins set (match sets the admin / captain ones); `chat_rules` is the pure decision |
 | `command_buffer_hook.*` | the AddText hook, `EnqueueServerCommand`, the core `ru` subcommands (`help`, `plugin`, `sigtest`, `selftest`, `reload`, `status_http`, `version`) and the dispatch of plugin console commands / `ru <sub>` / `RU_CMD_OBSERVE` |
 | `game_events.*` | listener install, RTTI, registration (core events + what plugins subscribe to), normalized events, the per-slot controller map, team-for-slot, the human team table's `player_team` source |
 | `log_receiver.*` | the file-tail fallback, the line fan-out to plugins and the log-derived normalized events |

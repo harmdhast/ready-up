@@ -1,13 +1,10 @@
 #include "readyup/host_say_hook.h"
 
 #include "readyup/ccommand.h"
-#include "readyup/config.h"
+#include "readyup/chat_intercept.h"
 #include "readyup/engine_surface.h"
 #include "readyup/game_events.h"
 #include "readyup/logging.h"
-#include "readyup/server_game_clients_hook.h"
-#include "readyup/slot_registry.h"
-#include "readyup/ru_router.h"
 
 #include <atomic>
 #include <cstdint>
@@ -38,28 +35,16 @@ int SlotForController(void* controller) {
 }
 
 static void DetourHostSay(void* controller, void* cmdRef, bool teamonly, int unk1, const char* unk2) {
-  // Always let original run first (match CSS default behavior).
-  if (g_hostSay) g_hostSay(controller, cmdRef, teamonly, unk1, unk2);
-
-  // If the ClientCommand hook is installed it routes `.ru` with a reliable sender; the log
-  // listener covers everything else. Host_Say only helps when neither can.
-  if (ServerGameClientsHookInstalled()) return;
-
   // Arguments via the verified CCommand layout only (no pointer-scanning for strings).
   const auto argv = ReadCCommandArgs(cmdRef);
-  if (!argv || argv->size() < 2) return;
-  const std::string text = CCommandArgString(*argv);
-  if (text.rfind(".ru", 0) != 0) return;
-  Debug("hostsay: saw .ru teamonly=%d unk1=%d unk2=%p\n", teamonly ? 1 : 0, unk1, (const void*)unk2);
+  if (!argv || argv->size() < 2) return g_hostSay(controller, cmdRef, teamonly, unk1, unk2);
 
+  // A console `say` has no controller: not a player line.
   const int slot = SlotForController(controller);
-  const auto id = slot >= 0 ? GetSlotIdentity(slot) : std::nullopt;
-  // Without a sender identity, leave it to the in-process log listener (it has SteamID/name).
-  if (!id || id->steamid64 == 0) {
-    DebugLine("hostsay: skipping routing (no sender identity)");
-    return;
-  }
-  RouteChatCommand(id->steamid64, id->name, text);
+  if (slot < 0) return g_hostSay(controller, cmdRef, teamonly, unk1, unk2);
+
+  if (HandlePlayerChat(slot, CCommandArgString(*argv), teamonly)) return;
+  g_hostSay(controller, cmdRef, teamonly, unk1, unk2);
 }
 
 }  // namespace

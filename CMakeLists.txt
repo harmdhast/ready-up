@@ -50,6 +50,8 @@ add_library(server_shim SHARED
   core/src/readyup/round_termination_hook.cpp
   core/src/readyup/ru_help.cpp
   core/src/readyup/ru_help_text.cpp
+  core/src/readyup/chat_intercept.cpp
+  core/src/readyup/chat_rules.cpp
   core/src/readyup/ru_router.cpp
   core/src/readyup/perf_stats.cpp
   core/src/readyup/center_panel_owner.cpp
@@ -396,6 +398,12 @@ target_link_libraries(readyup_license_status_test PRIVATE readyup_monocypher)
 add_executable(readyup_ru_help_test tests/ru_help_test.cpp core/src/readyup/ru_help_text.cpp)
 target_include_directories(readyup_ru_help_test PRIVATE ${CMAKE_SOURCE_DIR}/core/src)
 target_compile_options(readyup_ru_help_test PRIVATE -Wall -Wextra)
+
+# say / say_team decision (core/src/readyup/chat_rules.h).
+add_executable(readyup_chat_rules_test tests/chat_rules_test.cpp core/src/readyup/chat_rules.cpp)
+target_include_directories(readyup_chat_rules_test PRIVATE ${CMAKE_SOURCE_DIR}/core/src)
+target_compile_options(readyup_chat_rules_test PRIVATE -Wall -Wextra)
+add_test(NAME chat_rules COMMAND readyup_chat_rules_test)
 
 # Plugin time per server frame, `ru perf` (core/src/readyup/perf_stats.h).
 add_executable(readyup_perf_stats_test tests/perf_stats_test.cpp core/src/readyup/perf_stats.cpp)

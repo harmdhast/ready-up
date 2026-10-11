@@ -113,13 +113,14 @@ Both load, and Ready Up's bot-only match ran from start to finish. That only mea
 one crashes. Two match plugins still fight over the same server:
 
 - **`.r` / `.ready` are handled by both.** The AT plugin reads chat from the `player_chat`
-  game event. Ready Up sees the chat line earlier, in `ClientCommand`, and by default
-  (`consume_ready_chat=0`) lets it through, so `Host_Say` runs and the event fires. One
+  game event. Ready Up sees the chat line earlier, in `Host_Say` before the original, and by
+  default (`consume_ready_chat=0`) lets it through, so the engine runs it and the event fires. One
   `.r` then counts as ready in both plugins. The same goes for `.pause` / `.unpause` and the
   other commands they both have. During the test, the AT plugin sat in its own ready phase
   the whole time (`readyAvailable=True, isMatchSetup=False`), so a player's `.r` would have
   counted. (Worked out from the code, because no human joined. With `consume_ready_chat=1`,
-  Ready Up swallows `.r` before `Host_Say`, so the AT plugin would not see it.)
+  Ready Up swallows `.r` in `Host_Say` before the original, so the `player_chat` event does not
+  fire and the AT plugin would not see it.)
 - **Cvars get overwritten.** Every time Ready Up ran a config (warmup, knife, live), the AT
   plugin reset cheats and timescale. This happened 8 times in one match:
   `[Auto Tournament] [SimulationMode] Enforcing sv_cheats 0 and host_timescale 1 for non-simulation match.`
@@ -171,8 +172,8 @@ What each one patches, and what we saw in the running process (`/proc/<pid>/mem`
 | Target | Ready Up | Metamod / CounterStrikeSharp | What happens |
 |---|---|---|---|
 | `ISource2Server::GameFrame` (vtbl[19]) | writes the vtable slot at load | SourceHook writes the same slot afterwards | Chained: SourceHook's thunk is outermost and calls Ready Up's hook, which calls Valve's function. The slot pointed into SourceHook's anonymous memory, not Valve's function. Live test passes. |
-| `ISource2GameClients::ClientCommand` (vtbl[17]) | same | same (CSSharp command listeners) | Chained the same way. CSSharp's pre-hooks run **before** Ready Up, so a CSSharp plugin that returns `Handled` for `say` hides the line from Ready Up. |
-| `Host_Say` | funchook detour at load (5-byte `jmp`) | CSSharp's KHook detour (`Host_SayH`) | **CSSharp's hook is quietly missing.** Without Ready Up, the start of `Host_Say` is `e9 .. .. .. .. 90` into CSSharp's trampoline. With Ready Up, it's `e9 ...` into Ready Up's `libserver.so`, and neither Ready Up's trampoline nor its detour was patched a second time. CSSharp finds `Host_Say` fine (it scans a clean copy read from disk) and logs `Hooks added.`, but its detour isn't on the function. So CSSharp's chat handling that depends on `Host_Say` (chat triggers, silent `/` commands) should be treated as broken next to Ready Up. `AddCommandListener("say")` and the `player_chat` event are not affected. |
+| `ISource2GameClients::ClientCommand` (vtbl[17]) | same | same (CSSharp command listeners) | Chained the same way. CSSharp's pre-hooks run **before** Ready Up, so a CSSharp plugin that returns `Handled` for `say` hides the line from Ready Up where chat still reaches `ClientCommand`. |
+| `Host_Say` | funchook detour at load (5-byte `jmp`) | CSSharp's KHook detour (`Host_SayH`) | **CSSharp's hook is quietly missing.** Without Ready Up, the start of `Host_Say` is `e9 .. .. .. .. 90` into CSSharp's trampoline. With Ready Up, it's `e9 ...` into Ready Up's `libserver.so`, and neither Ready Up's trampoline nor its detour was patched a second time. CSSharp finds `Host_Say` fine (it scans a clean copy read from disk) and logs `Hooks added.`, but its detour isn't on the function. So CSSharp's chat handling that depends on `Host_Say` (chat triggers, silent `/` commands) should be treated as broken next to Ready Up. `AddCommandListener("say")` and the `player_chat` event are not affected, except for lines Ready Up swallows (`RU_CMD_HIDE`, `consume_ru_chat`, prefix relays). |
 | `CCSGameRules::TerminateRound` | funchook detour, installed only when needed | CSSharp only calls it (`TerminateRound()` API) | Calls go through Ready Up's detour. While Ready Up holds round ends back (warmup/practice), a plugin's `TerminateRound()` does nothing. |
 
 Neither side patches the other's code, so there's no "both overwrote the same prologue"
