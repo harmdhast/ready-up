@@ -742,9 +742,68 @@ TEST(TestDemoStreaming) {
   p.Stop();
 }
 
+// A reliable match.* message that arrives before the match plugin registered (startup) is held, not
+// acked and not answered unknown_type, and is delivered once a handler for it is there. Past the
+// window it gets today's answer.
+TEST(TestHoldUnhandledAtStartup) {
+  mock::Platform p;
+  CHECK(p.Start());
+  p.heartbeatIntervalMs = 300;
+  const std::string dir = TempDir();
+  ClientConfig cfg = BaseConfig(p, dir);
+  cfg.enrollCode = "RUE-7F3K-9QX2-LM4D";
+  Client c(cfg);
+  c.SetHelloInfo(Hello());
+  c.SetHandledTypes({}, false);
+  c.HoldUnhandled("match.", 30000);
+  std::string err;
+  CHECK(c.Start(&err));
+  CHECK(WaitState(c, LinkState::Online, 5000));
+  CHECK(p.SendToServer("match.unassign", R"({"match_id":"m1","epoch":1,"reason":"superseded"})", true));
+  std::this_thread::sleep_for(std::chrono::milliseconds(1300));
+  CHECK(p.MessagesOfType("error").empty());
+  CHECK_EQ(p.lastAckFromServer(), int64_t(0));
+  CHECK(c.TakeInbound().empty());
+  c.SetHandledTypes({"match.unassign"}, false);
+  std::deque<Inbound> in;
+  CHECK(p.WaitFor([&] {
+    for (auto& m : c.TakeInbound()) in.push_back(std::move(m));
+    return !in.empty();
+  }, 2000));
+  CHECK(!in.empty() && in.front().env.type == "match.unassign" && in.front().reliable);
+  if (!in.empty()) c.MarkProcessed(in.front().env.seq);
+  CHECK(p.WaitFor([&] { return p.lastAckFromServer() >= 1; }, 2500));
+  c.Stop();
+  p.Stop();
+}
+
+TEST(TestHoldUnhandledWindowEnds) {
+  mock::Platform p;
+  CHECK(p.Start());
+  p.heartbeatIntervalMs = 300;
+  const std::string dir = TempDir();
+  ClientConfig cfg = BaseConfig(p, dir);
+  cfg.enrollCode = "RUE-7F3K-9QX2-LM4D";
+  Client c(cfg);
+  c.SetHelloInfo(Hello());
+  c.SetHandledTypes({}, false);
+  c.HoldUnhandled("match.", 800);
+  std::string err;
+  CHECK(c.Start(&err));
+  CHECK(WaitState(c, LinkState::Online, 5000));
+  CHECK(p.SendToServer("match.unassign", R"({"match_id":"m1","epoch":1,"reason":"superseded"})", true));
+  CHECK(p.WaitFor([&] { return !p.MessagesOfType("error").empty(); }, 4000));
+  CHECK_EQ(p.MessagesOfType("error").at(0).payload()->Get("code")->AsStr(), std::string("unknown_type"));
+  CHECK(p.WaitFor([&] { return p.lastAckFromServer() >= 1; }, 2500));
+  c.Stop();
+  p.Stop();
+}
+
 int main() {
   RUN(TestSchemaValidator);
   RUN(TestEnrollConnectPingAck);
+  RUN(TestHoldUnhandledAtStartup);
+  RUN(TestHoldUnhandledWindowEnds);
   RUN(TestReconnectResumeReset);
   RUN(TestResumeAfterRestart);
   RUN(TestOfflineSpoolThenConnect);

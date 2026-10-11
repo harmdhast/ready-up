@@ -938,6 +938,9 @@ bool StartClient(const std::string& url) {
   };
   auto c = std::make_shared<fleet::Client>(cfg);
   c->SetHelloInfo(g_hello);
+  // match.so registers its handlers on its first frame: a replayed match.* that arrives before
+  // (a match.unassign from a failover while this server was down) waits for it.
+  c->HoldUnhandled("match.", 30000);
   c->SetWake([api] {
     if (!g_drainPosted.exchange(true)) api->post_to_game_thread(api->self, &DrainTask, nullptr);
   });
