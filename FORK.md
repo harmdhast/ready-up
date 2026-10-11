@@ -5,8 +5,8 @@ Each branch also exists on its own, so it can go upstream as a separate PR.
 
 ## Versioning
 
-- Tags are `vX.Y.Z-custom.N`; `X.Y.Z` is the upstream release `custom` is based on (`v0.1.0-beta.16-custom.1` for `0.1.0-beta.16`).
-- Push a tag to build a fork release. A `-custom` version is always a pre-release, never latest.
+- Tags are the upstream release `custom` is based on plus `.custom.N` (`v0.1.0-beta.16.custom.1` for `v0.1.0-beta.16`; `vX.Y.Z-custom.N` on a stable `vX.Y.Z`). The dot keeps SemVer ordering numeric (`beta.100.custom.1` > `beta.99.custom.1`).
+- Push a tag to build a fork release. A custom version is always a pre-release, never latest.
 - Servers install it with `READYUP_REPO=harmdhast/ready-up`:
 
 ```bash
