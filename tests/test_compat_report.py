@@ -337,7 +337,7 @@ class CompatReportTest(unittest.TestCase):
         self.assertEqual(self.check(match, "hook_site")["total"], 1)
         self.assertEqual(self.check(match, "vtable")["passed"], 2)
         self.assertEqual(self.check(match, "schema")["status"], "pending")
-        self.assertEqual(self.check(match, "schema")["total"], 22)
+        self.assertEqual(self.check(match, "schema")["total"], 27)
         self.assertEqual(self.check(match, "event")["status"], "pending")
         self.assertEqual(self.check(match, "livetest")["status"], "pending")
         # whitelist needs no Host_Say (no chat commands)
