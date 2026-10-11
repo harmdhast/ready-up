@@ -1,4 +1,5 @@
 #include "readyup/ready_hud.h"
+#include "readyup/ready_hud_logic.h"
 
 #include "readyup/plugin_api.h"
 
@@ -38,15 +39,8 @@ using Clock = std::chrono::steady_clock;
 
 constexpr int kMaxNamesPerSide = 6;
 constexpr size_t kMaxNameBytes = 12;
-
-// Palette (matches the welcome screen).
-constexpr const char* kCt = "#5EA8FF";
-constexpr const char* kT = "#FF9D3B";
-constexpr const char* kGold = "#FFD23F";
-constexpr const char* kGrey = "#8A8F98";
-constexpr const char* kDim = "#5B6068";
-constexpr const char* kOk = "#7CD35A";
-constexpr const char* kNo = "#F87171";
+// Names in one waiting list, so a side line fits the panel (the rest show as "+N").
+constexpr size_t kMaxWaitingBytes = 40;
 
 struct Entry {
   uint64_t sid = 0;
@@ -57,13 +51,16 @@ struct Entry {
 };
 
 struct Board {
-  std::string title;      // e.g. "scrim warmup"
-  std::string countdown;  // e.g. "knife in 3" (empty when none)
+  std::string status = "WARMUP";  // header status: WARMUP / SCRIM / RECOVERY, or the countdown
+  const char* statusColor = kGold;
+  std::string label[2] = {"CT", "T"};  // team line labels: [0] CT, [1] T (escaped HTML)
   std::vector<Entry> entries;
   int botsCt = 0;
   int botsT = 0;
   int ready = 0;
   int total = 0;
+  int sideReady[2] = {0, 0};  // [0] CT, [1] T
+  int sideTotal[2] = {0, 0};
   bool tallied = false;  // ready/total set per team (match); else counted from entries (scrim)
   bool scrim = false;
   std::string note;  // e.g. "need players on both CT and T" (empty when none)
@@ -90,34 +87,7 @@ constexpr const char* kTestPngWiki =
     "https://upload.wikimedia.org/wikipedia/commons/thumb/4/47/PNG_transparency_demonstration_1.png/"
     "250px-PNG_transparency_demonstration_1.png";
 
-static std::string Esc(const std::string& in, size_t maxBytes) {
-  std::string s = in;
-  if (s.size() > maxBytes) {
-    size_t cut = maxBytes;
-    while (cut > 0 && (static_cast<unsigned char>(s[cut]) & 0xC0) == 0x80) --cut;
-    s.resize(cut);
-    s += "..";
-  }
-  std::string out;
-  out.reserve(s.size() + 8);
-  for (char c : s) {
-    switch (c) {
-      case '<': out += "&lt;"; break;
-      case '>': out += "&gt;"; break;
-      case '&': out += "&amp;"; break;
-      case '"': out += "&quot;"; break;
-      case '\'': out += "&#39;"; break;
-      default:
-        if (static_cast<unsigned char>(c) >= 0x20) out += c;
-        break;
-    }
-  }
-  return out;
-}
-
-static std::string Font(const char* color, const std::string& inner) {
-  return std::string("<font color='") + color + "'>" + inner + "</font>";
-}
+static std::string Font(const char* color, const std::string& inner) { return HudFont(color, inner); }
 
 // A URL that can sit inside a single-quoted HTML attribute (http/https only).
 static std::string AttrSafeUrl(const std::string& url) {
@@ -133,14 +103,19 @@ static std::string Img(const std::string& url, int height) {
   return "<img src='" + url + "' width='" + std::to_string(height) + "' height='" + std::to_string(height) + "'>";
 }
 
-static std::string NameOf(uint64_t sid, const std::unordered_map<uint64_t, std::string>& names) {
-  auto it = names.find(sid);
-  if (it != names.end() && !it->second.empty()) return it->second;
-  for (const auto& p : ListObservedPlayers()) {
-    if (p.steamid64 == sid && !p.name.empty()) return p.name;
+static std::string NameOf(uint64_t sid, const std::unordered_map<uint64_t, std::string>& names,
+                          const std::unordered_map<uint64_t, std::string>* rosterNames = nullptr) {
+  std::string connected, roster, observed;
+  if (auto it = names.find(sid); it != names.end()) connected = it->second;
+  if (rosterNames) {
+    if (auto it = rosterNames->find(sid); it != rosterNames->end()) roster = it->second;
   }
-  const std::string s = std::to_string(static_cast<unsigned long long>(sid));
-  return "#" + s.substr(s.size() > 4 ? s.size() - 4 : 0);
+  if (connected.empty() && roster.empty()) {
+    for (const auto& p : ListObservedPlayers()) {
+      if (p.steamid64 == sid && !p.name.empty()) observed = p.name;
+    }
+  }
+  return ReadyHudDisplayName(sid, connected, roster, observed);
 }
 
 static Board BuildBoard(ReadyUpMode mode, const std::optional<WebhookMatchContext>& ctx,
@@ -151,7 +126,7 @@ static Board BuildBoard(ReadyUpMode mode, const std::optional<WebhookMatchContex
 
   if (mode == ReadyUpMode::ScrimWarmup || !ctx) {
     b.scrim = true;
-    b.title = "scrim warmup";
+    b.status = "SCRIM";
     const auto roster = BuildScrimRoster();
     for (const auto& kv : roster.teamNum) {
       Entry e;
@@ -169,10 +144,13 @@ static Board BuildBoard(ReadyUpMode mode, const std::optional<WebhookMatchContex
       b.note = DevBotsReadyEnabled() ? "need players (or bots) on both CT and T" : "need players on both CT and T";
     }
     const int cd = ScrimCountdownSecondsLeft();
-    if (cd >= 0) b.countdown = std::string(settings::Bool("knife_enabled_default") ? "knife in " : "live in ") + std::to_string(cd);
+    if (cd >= 0) {
+      b.status = std::string(settings::Bool("knife_enabled_default") ? "KNIFE IN " : "LIVE IN ") + std::to_string(cd);
+      b.statusColor = kOk;
+    }
   } else {
     b.scrim = (ctx->slug == "scrim");
-    b.title = RecoveryGateEnabled() ? "recovered match" : (b.scrim ? "scrim" : "match warmup");
+    b.status = RecoveryGateEnabled() ? "RECOVERY" : (b.scrim ? "SCRIM" : "WARMUP");
     const auto ms = MatchStateGet();
     const int mapNum = ms.map_number <= 0 ? 1 : ms.map_number;
     bool team1Ct = true;
@@ -180,6 +158,8 @@ static Board BuildBoard(ReadyUpMode mode, const std::optional<WebhookMatchContex
         ctx->map_sides[static_cast<size_t>(mapNum - 1)] == "team2_ct") {
       team1Ct = false;
     }
+    b.label[0] = ReadyHudTeamLabel(true, team1Ct ? ctx->team1_name : ctx->team2_name);
+    b.label[1] = ReadyHudTeamLabel(false, team1Ct ? ctx->team2_name : ctx->team1_name);
     std::unordered_set<uint64_t> connected;
     for (const auto& h : humans) connected.insert(h.steamid64);
     int teamRoster[2] = {0, 0}, teamReady[2] = {0, 0};
@@ -189,7 +169,7 @@ static Board BuildBoard(ReadyUpMode mode, const std::optional<WebhookMatchContex
       e.sid = kv.first;
       const bool t1 = (kv.second == WebhookTeam::Team1);
       e.side = (t1 == team1Ct) ? 3 : 2;
-      e.name = NameOf(kv.first, names);
+      e.name = NameOf(kv.first, names, &ctx->roster_names);
       e.ready = IsReady(kv.first);
       e.connected = connected.count(kv.first) != 0;
       ++teamRoster[t1 ? 0 : 1];
@@ -201,6 +181,9 @@ static Board BuildBoard(ReadyUpMode mode, const std::optional<WebhookMatchContex
       const ReadyTally tally = TeamReadyTally(teamRoster[t], teamReady[t], ctx->players_per_team);
       b.ready += tally.ready;
       b.total += tally.total;
+      const int sideIdx = ((t == 0) == team1Ct) ? 0 : 1;
+      b.sideReady[sideIdx] = tally.ready;
+      b.sideTotal[sideIdx] = tally.total;
     }
     b.tallied = true;
     if (DevBotsReadyEnabled()) {
@@ -216,93 +199,71 @@ static Board BuildBoard(ReadyUpMode mode, const std::optional<WebhookMatchContex
     for (const auto& e : b.entries) {
       b.total++;
       if (e.ready) b.ready++;
+      const int sideIdx = e.side == 3 ? 0 : 1;
+      b.sideTotal[sideIdx]++;
+      if (e.ready) b.sideReady[sideIdx]++;
     }
   }
   return b;
 }
 
-// One side's line. Entries are grouped by color (ready, not ready, not
-// connected) so each run costs one <font> tag: keeps 5v5 well under ~1 KB.
+// One side's line: the team count and the players still not ready, connected ones first.
 static std::string SideLine(const Board& b, int side, uint64_t viewer) {
-  std::string s = Font(side == 3 ? kCt : kT, side == 3 ? "<b>CT</b>" : "<b>T</b>");
   std::vector<const Entry*> list;
   for (const auto& e : b.entries) {
-    if (e.side == side) list.push_back(&e);
+    if (e.side == side && !e.ready) list.push_back(&e);
   }
-  auto rank = [](const Entry* e) { return !e->connected ? 2 : (e->ready ? 0 : 1); };
-  std::stable_sort(list.begin(), list.end(), [&](const Entry* x, const Entry* y) { return rank(x) < rank(y); });
+  std::stable_sort(list.begin(), list.end(), [](const Entry* x, const Entry* y) { return x->connected > y->connected; });
 
-  int shown = 0, hidden = 0;
-  const char* runColor = nullptr;
-  std::string run;
-  auto flush = [&]() {
-    if (runColor && !run.empty()) s += "&#160; " + Font(runColor, run);
-    run.clear();
-  };
+  std::vector<std::string> waiting;
+  int hidden = 0;
+  size_t used = 0;
   for (const Entry* e : list) {
-    // Keep the viewer visible even past the cap.
-    if (shown >= kMaxNamesPerSide && e->sid != viewer) {
+    const size_t len = std::min(e->name.size(), kMaxNameBytes) + (waiting.empty() ? 0 : 2);
+    // Keep the viewer visible even past the caps.
+    if ((static_cast<int>(waiting.size()) >= kMaxNamesPerSide || used + len > kMaxWaitingBytes) && e->sid != viewer) {
       hidden++;
       continue;
     }
-    const char* col = !e->connected ? kDim : (e->ready ? kOk : kNo);
-    if (col != runColor) {
-      flush();
-      runColor = col;
-    } else {
-      run += "&#160; ";
-    }
-    run += e->ready ? "&#10004;" : "&#10006;";
-    const std::string nm = Esc(e->name, kMaxNameBytes);
-    run += (e->sid == viewer) ? "<b>" + nm + "</b>" : nm;
-    shown++;
+    used += len;
+    const std::string nm = HudEscape(e->name, kMaxNameBytes);
+    waiting.push_back(e->sid == viewer ? "<b>" + nm + "</b>" : nm);
   }
-  flush();
-  if (hidden > 0) s += " " + Font(kGrey, "+" + std::to_string(hidden));
-  const int bots = (side == 3) ? b.botsCt : b.botsT;
-  if (bots > 0) s += " " + Font(kOk, "&#10004;" + std::to_string(bots) + (bots == 1 ? " bot" : " bots"));
-  if (shown == 0 && hidden == 0 && bots == 0) s += " " + Font(kDim, "-");
-  return s;
+  const int idx = side == 3 ? 0 : 1;
+  return ReadyHudTeamLine(side == 3, b.label[idx], b.sideReady[idx], b.sideTotal[idx], waiting, hidden, side == 3 ? b.botsCt : b.botsT);
 }
+
+// Panels resent every frame use the brand text only (an image blinks, docs/HUD.md).
+static std::string HudBrandText() { return FeatureEnabled(Feature::HudBrand) ? Cfg().hud_brand : std::string(); }
 
 static std::string ReadyHtml(const Board& b, uint64_t viewer, const std::string& footer) {
   std::string h;
   h.reserve(768);
-  const std::string brand = HudBrandHtml(/*imgHeight=*/20, "");
-  if (!brand.empty()) h += brand + " " + Font(kGrey, "&#183; " + b.title);
-  else h += Font(kGrey, b.title);
-  if (!b.countdown.empty()) h += " " + Font(kGold, "&#183; <b>" + b.countdown + "</b>");
-  h += "<br>";
-  h += Font(b.total > 0 && b.ready == b.total ? kOk : kGold,
-            "<b>" + std::to_string(b.ready) + "/" + std::to_string(b.total) + " ready</b>");
-  h += "<br>" + SideLine(b, 3, viewer) + "<br>" + SideLine(b, 2, viewer) + "<br>";
+  h += HudHeader(HudBrandText(), b.statusColor, b.status) + "<br>";
+  h += ReadyHudCountLine(b.ready, b.total) + "<br>";
+  h += "<font class='fontSize-sm'>" + SideLine(b, 3, viewer) + "</font><br><font class='fontSize-sm'>" +
+       SideLine(b, 2, viewer) + "</font><br>";
 
-  const Entry* me = nullptr;
+  ReadyViewer me = ReadyViewer::Absent;
   for (const auto& e : b.entries) {
-    if (e.sid == viewer) me = &e;
+    if (e.sid == viewer) me = e.ready ? ReadyViewer::Ready : ReadyViewer::NotReady;
   }
-  if (!me) {
-    h += Font(kGrey, b.scrim ? "join CT or T to play" : "spectating");
-  } else if (me->ready) {
-    h += Font(kGrey, "you are ready &#183; <b>.ur</b> to cancel");
-  } else {
-    h += Font(kGold, "type <b>.r</b> in chat when ready");
-  }
+  h += ReadyHudViewerLine(me, b.scrim);
   if (!b.note.empty()) h += "<br>" + Font(kGrey, b.note);
   if (!footer.empty()) h += "<br>" + footer;
   return h;
 }
 
-static std::string KnifeHtml(const KnifeHudInfo& k, int viewerSide) {
+static std::string KnifeHtml(const KnifeHudInfo& k, int viewerSide, const std::string& brand) {
   std::string h;
   h.reserve(384);
-  h += Font(kGold, "<b>KNIFE ROUND</b>") + "<br>";
+  h += HudHeader(brand, kGold, "KNIFE ROUND") + "<br>";
   if (k.phase == KnifePhase::Starting) {
     h += "knives only &#183; the winning team picks its side";
     return h;
   }
   const char* col = (k.winnerCs == 3) ? kCt : kT;
-  h += Font(col, "<b>" + Esc(k.winnerName, 24) + "</b>") + " won";
+  h += Font(col, "<b>" + HudEscape(k.winnerName, 24) + "</b>") + " won";
   if (!k.reasonShort.empty()) h += " " + Font(kGrey, "(" + k.reasonShort + ")");
   h += "<br>";
   const std::string secs = std::to_string(k.secondsLeft) + "s";
@@ -310,52 +271,60 @@ static std::string KnifeHtml(const KnifeHudInfo& k, int viewerSide) {
     h += Font(kOk, "type <b>.stay</b> or <b>.switch</b>") + "<br>";
     h += Font(kGrey, "no pick in " + secs + " = stay");
   } else {
-    h += Font(kGrey, "waiting for " + Esc(k.winnerName, 24) + " to pick a side &#183; " + secs);
+    h += Font(kGrey, "waiting for " + HudEscape(k.winnerName, 24) + " to pick a side &#183; " + secs);
   }
   return h;
 }
 
 // Live map: pause state + countdowns, and the team-left forfeit countdown. No images (resent
 // every frame, docs/HUD.md). Empty when there is nothing to show.
-static std::string LiveHtml(const LiveHudInfo& l) {
+static std::string LiveHtml(const LiveHudInfo& l, const std::string& brand) {
   std::string h;
   if (l.paused) {
     if (l.type == "tactical") {
-      h += Font(kGold, "<b>TACTICAL TIMEOUT</b>");
-      if (!l.byTeam.empty()) h += "<br>" + Esc(l.byTeam, 24);
+      h += HudHeader(brand, kGold, "TACTICAL TIMEOUT");
+      if (!l.byTeam.empty()) h += "<br>" + HudEscape(l.byTeam, 24);
     } else if (l.type == "technical") {
-      h += Font(kNo, "<b>TECHNICAL PAUSE</b>");
-      if (!l.byTeam.empty()) h += " " + Font(kGrey, "by " + Esc(l.byTeam, 24));
+      h += HudHeader(brand, kNo, "TECHNICAL PAUSE");
+      // "by Navi · auto-unpause in 4:32" under the header.
+      std::string sub;
+      if (!l.byTeam.empty()) sub += Font(kGrey, "by " + HudEscape(l.byTeam, 24));
+      std::string when;
       if (l.pendingFreeze) {
-        h += "<br>" + Font(kGrey, "pausing at freeze time");
+        when = Font(kGrey, "pausing at freeze time");
       } else if (l.secondsLeft >= 0) {
-        h += "<br>auto-unpause in <b>" + std::to_string(l.secondsLeft / 60) + ":" +
-             (l.secondsLeft % 60 < 10 ? "0" : "") + std::to_string(l.secondsLeft % 60) + "</b>";
+        when = "auto-unpause in <b>" + std::to_string(l.secondsLeft / 60) + ":" +
+               (l.secondsLeft % 60 < 10 ? "0" : "") + std::to_string(l.secondsLeft % 60) + "</b>";
       }
-      auto mark = [&](bool ok, const std::string& n) { return Font(ok ? kOk : kDim, (ok ? "&#10004; " : "&#10006; ") + Esc(n, 16)); };
+      if (!sub.empty() && !when.empty()) sub += " " + Font(kGrey, "&#183;") + " ";
+      sub += when;
+      if (!sub.empty()) h += "<br>" + sub;
+      auto mark = [&](bool ok, const std::string& n) { return Font(ok ? kOk : kDim, (ok ? "&#10004; " : "&#10006; ") + HudEscape(n, 16)); };
       h += "<br>" + Font(kGrey, l.bothRequired ? "both teams: " : "pausing team: ") + "<b>.unpause</b><br>" +
            mark(l.team1Confirmed, l.team1) + " &#183; " + mark(l.team2Confirmed, l.team2);
     } else if (l.type == "halftime" || l.type == "auto_5v5" || l.type == "restore") {
       // Pauses that belong to nobody (an engine pause, or a round restore): both teams resume
       // them (match_features.h).
       if (l.type == "halftime") {
-        h += Font(kGold, "<b>HALFTIME PAUSE</b>");
+        h += HudHeader(brand, kGold, "HALFTIME PAUSE");
       } else if (l.type == "restore") {
-        h += Font(kGold, "<b>ROUND RESTORED</b>");
+        h += HudHeader(brand, kGold, "ROUND RESTORED");
       } else {
-        h += Font(kNo, "<b>NOT 5v5 - PAUSED</b>");
-        if (!l.byTeam.empty()) h += "<br>" + Font(kGrey, Esc(l.byTeam, 24) + " is short");
+        h += HudHeader(brand, kNo, "NOT 5v5 - PAUSED");
+        if (!l.byTeam.empty()) h += "<br>" + Font(kGrey, HudEscape(l.byTeam, 24) + " is short");
       }
-      auto mark = [&](bool ok, const std::string& n) { return Font(ok ? kOk : kDim, (ok ? "&#10004; " : "&#10006; ") + Esc(n, 16)); };
+      auto mark = [&](bool ok, const std::string& n) { return Font(ok ? kOk : kDim, (ok ? "&#10004; " : "&#10006; ") + HudEscape(n, 16)); };
       h += "<br>" + Font(kGrey, "both teams: ") + "<b>.unpause</b><br>" + mark(l.team1Confirmed, l.team1) +
            " &#183; " + mark(l.team2Confirmed, l.team2);
     } else {
-      h += Font(kNo, "<b>PAUSED BY ADMIN</b>") + "<br>" + Font(kGrey, "an admin unpauses (.fup)");
+      h += HudHeader(brand, kNo, "PAUSED BY ADMIN") + "<br>" + Font(kGrey, "an admin unpauses (.fup)");
     }
   }
   if (l.forfeit) {
-    if (!h.empty()) h += "<br>";
-    h += Font(kNo, "<b>" + Esc(l.forfeitTeam, 24) + " LEFT</b>") + "<br>forfeit in <b>" +
+    // A pause owns the header; the forfeit then stays a red line below it.
+    const std::string left = HudEscape(l.forfeitTeam, 24) + " LEFT";
+    h += h.empty() ? HudHeader(brand, kNo, left) : "<br>" + Font(kNo, "<b>" + left + "</b>");
+    h += "<br>forfeit in <b>" +
          std::to_string(l.forfeitSecondsLeft / 60) + ":" + (l.forfeitSecondsLeft % 60 < 10 ? "0" : "") +
          std::to_string(l.forfeitSecondsLeft % 60) + "</b> unless a player reconnects";
   }
@@ -395,7 +364,7 @@ static std::string TestHtml(int n) {
       const auto c = Cfg();
       const std::string url = AttrSafeUrl(c.hud_logo_url);
       std::string h = title + HudBrandHtml(24, "fontSize-l") + "<br>";
-      h += Font(kGrey, "hud_logo_url=" + (url.empty() ? std::string("(none)") : Esc(url, 80)));
+      h += Font(kGrey, "hud_logo_url=" + (url.empty() ? std::string("(none)") : HudEscape(url, 80)));
       if (!c.hud_logo_url.empty() && url.empty()) h += "<br>" + Font(kNo, "hud_logo_url rejected (needs http(s), no quotes/spaces)");
       return h;
     }
@@ -461,7 +430,7 @@ std::string HudBrandHtml(int imgHeight, const char* fontClass) {
     if (!h.empty()) h += " ";
     h += "<font ";
     if (fontClass && *fontClass) h += std::string("class='") + fontClass + "' ";
-    h += std::string("color='") + kGold + "'><b>" + Esc(c.hud_brand, 40) + "</b></font>";
+    h += std::string("color='") + kGold + "'><b>" + HudEscape(c.hud_brand, 40) + "</b></font>";
   }
   return h;
 }
@@ -629,7 +598,7 @@ void ReadyHudTick() {
       if (holding) knife.phase = KnifePhase::Starting;  // same "knives only" text while held
     }
   } else if (mode == ReadyUpMode::MatchLive) {
-    liveHtml = LiveHtml(MatchFeaturesHud());
+    liveHtml = LiveHtml(MatchFeaturesHud(), HudBrandText());
     if (!liveHtml.empty()) what = What::Live;
   }
   if (what == What::None && tests.empty()) {
@@ -638,6 +607,7 @@ void ReadyHudTick() {
   }
 
   const auto humans = ListHumans();
+  const std::string brand = HudBrandText();
   Board board;
   std::string footer;
   if (what == What::Ready) {
@@ -667,7 +637,7 @@ void ReadyHudTick() {
       if (AdminCallCardActiveFor(slot)) continue;      // an `.admin` call card (admin_call.h)
       html = (what == What::Ready)   ? ReadyHtml(board, h.steamid64, footer)
              : (what == What::Live) ? liveHtml
-                                    : KnifeHtml(knife, h.team);
+                                    : KnifeHtml(knife, h.team, brand);
     }
     if (html.empty()) continue;
 

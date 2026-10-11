@@ -56,6 +56,13 @@ the panel, and the ceiling for animations.
 
 Logos must be hosted as a PNG already scaled to the display size.
 
+## Panel header
+
+The ready, knife and live panels start with `hud_brand · STATUS`: the brand in gold, the status in
+bold caps in the panel's color. With `hud_brand` empty (or the `hud_brand` feature off) the header
+is the status alone. These panels are resent every frame, so they never show `hud_logo_url`; the
+logo stays on the welcome card.
+
 ## When the ready panel is shown
 
 The ready list shows in scrim warmup and in match warmup. `ru_warmup_enable 0` does not just hide
@@ -63,15 +70,32 @@ it: it turns off ready-up for loaded matches (no panel, no knife round, live on 
 start). To hide the panel but keep ready-up, set `ready_hud=0` in `readyup.cfg` (chat reminders
 come back).
 
+```
+Auto Tournament · WARMUP
+3/10 READY
+Navi 1/5 · waiting: alice, bob, carl
+Vitality 5/5 · ready
+type .r to ready up
+```
+
+- Status: `WARMUP` (gold) in match warmup, `SCRIM` in scrims, `RECOVERY` after a recovered match;
+  a scrim countdown replaces it in green (`KNIFE IN 3` / `LIVE IN 3`).
+- `R/T READY` in the large font: gold while waiting, green when everyone is ready.
+- One line per team: the team name in its side color (`CT` / `T` in scrims and when the match
+  config has no name, cut at 16 bytes), the count (gold, green when full) and who is still not ready.
+- The viewer's line: `type .r to ready up` (red), `READY · .ur to cancel` (green), or `spectating`
+  (`join CT or T to play` in scrims).
+
 ## Knife panel and chat
 
-- After the knife round starts, the KNIFE ROUND panel stays up for `hud_knife_hold_s` seconds (default 10), also while the round is running.
+- The header status is `KNIFE ROUND`. After the knife round starts, the panel stays up for `hud_knife_hold_s` seconds (default 10), also while the round is running.
 - While the panel reaches players, flow updates (ready, countdown, knife start, knife winner, side pick) are shown only in the panel, not in chat. Replies that explain a refused command, admin actions and the LIVE line still go to chat. With `ready_hud=0`, or if a panel send fails, the chat messages come back.
 
 ## Live panel (pauses, forfeit)
 
 While a map is live the panel is only shown when there is something to wait for
-(`plugins/match/readyup/match_features.h`), with the same every-frame resend and no images:
+(`plugins/match/readyup/match_features.h`), with the same every-frame resend and no images. Each
+state below is the header status; when a pause and a forfeit are both up, the pause owns the header:
 
 - TACTICAL TIMEOUT (`.tac`) with the team, until the timeout ends (`round_freeze_end`).
 - TECHNICAL PAUSE with the team, "pausing at freeze time" until it takes effect, then the

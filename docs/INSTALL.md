@@ -334,8 +334,9 @@ chat_prefix="<Green>[PUG #1]<Default>"
 ### Ready HUD
 
 - `ready_hud=1` (default): during scrim warmup and match warmup every player gets a
-  small center panel (only for them): `X/Y ready`, each player per side with ✔/✖
-  (CT blue, T orange; your own name in bold) and a `.r` / `.ur` hint. It waits while
+  small center panel (only for them): a `hud_brand · WARMUP` header, `X/Y READY`, one line
+  per team (the team name in its side color, who is still not ready; your own name in bold)
+  and a `.r` / `.ur` line ([HUD.md](HUD.md)). It waits while
   the welcome screen is up, hides once the match goes live, and shows the knife
   side-pick prompt after a knife round. `ru_warmup_message_html` text (if set) is
   shown as its last line. Same `LegacyGameEventListener` requirement as the welcome screen.
