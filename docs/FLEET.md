@@ -157,7 +157,9 @@ version.**
 
 - `match.assign` with `resume` (schema `match.defs.json#/$defs/resume`) is accepted: the backup
   comes inline (`backup`, single part, sha256 + size checked before the ack: `checksum`), as a
-  file the server has (`backup_ref {file?, sha256?}`: restart in place) or, with neither, as the
+  file the server has (`backup_ref {file?, sha256?}`: restart in place, or a file the platform sent
+  just before in `backup.part` messages, `match.backup_parts.v1`: one inlineBackup part each, kept in
+  memory by sha256 for two minutes and assembled when the assign names it) or, with neither, as the
   server's own file for `map_number` / `round` (`no_backup` when missing). It is written as
   `readyup_resume_<id>_map<N>_round<NN>.txt` (never overwritten by CS2's own backups, never
   forwarded). The series score, the earlier maps' results (`series_score` / `maps`, else from

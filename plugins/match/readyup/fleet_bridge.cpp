@@ -878,6 +878,9 @@ Result WriteBackupFile(const std::string& name, const std::string& raw) {
   return Ok();
 }
 
+// backup.part: the parts of a backup the next failover match.assign names by backup_ref.
+fs::BackupParts g_backupParts;
+
 // A resume's backup (inline, a named local file, or this match's own file for map / round) as
 // readyup_resume_<id>_map<N>_round<NN>.txt: a name CS2's own round backups never overwrite and the
 // backup scan never forwards. Sets plan->file / sha256.
@@ -901,6 +904,13 @@ Result PrepareResumeBackup(unsigned long long matchId, fs::ResumePlan* plan) {
           break;
         }
       }
+    }
+    if ((name.empty() || dir.empty()) && !plan->sha256.empty() && g_backupParts.Take(plan->sha256, g_now, &raw)) {
+      plan->raw.clear();  // sent in parts (backup.part) before this assign
+      Result r = WriteBackupFile(dest, raw);
+      if (r.status != "ok") return r;
+      plan->file = dest;
+      return Ok();
     }
     if (name.empty() || dir.empty()) {
       return Rejected("no_backup", "no local backup for map " + std::to_string(plan->map_number) + " round " +
@@ -1660,6 +1670,13 @@ void OnServerConfig(const ru_fleet_msg* m) {
   Print("fleet: server.config rev %lld: %d setting(s) applied\n", rev, n);
 }
 
+void OnBackupPart(const ru_fleet_msg* m) {
+  const Json p = ParsePayload(m);
+  const Json* b = p.Find("backup");
+  std::string why;
+  if (!b || !g_backupParts.Add(*b, g_now, &why)) Print("fleet: backup.part refused: %s\n", why.c_str());
+}
+
 void OnDrain(bool drain, const ru_fleet_msg* m) {
   const Json p = ParsePayload(m);
   const std::string reason = Str(p, "reason");
@@ -1875,6 +1892,7 @@ void OnMessage(void*, const ru_fleet_msg* m) {
     const std::string t = m->type;
     if (t == "match.assign") OnAssign(m);
     else if (t == "match.update") OnUpdate(m);
+    else if (t == "backup.part") OnBackupPart(m);
     else if (t == "match.unassign") OnUnassign(m);
     else if (t == "cmd") OnCmd(m);
     else if (t == "local.offline_timeout") OnOfflineTimeout(m);
@@ -1900,7 +1918,7 @@ void EnsureHandlers() {
   if (inst == g_fleetInstance) return;
   g_fleetInstance = inst;
   g_handlerIds.clear();  // a new fleet.so image has no registrations
-  for (const char* type : {"match.assign", "match.update", "match.unassign", "cmd", "local.offline_timeout",
+  for (const char* type : {"match.assign", "match.update", "match.unassign", "backup.part", "cmd", "local.offline_timeout",
                            "local.connection", "admins.set", "server.config", "server.drain",
                            "server.undrain"}) {
     const uint64_t id = f->register_handler(type, &OnMessage, nullptr);
@@ -1909,6 +1927,7 @@ void EnsureHandlers() {
   f->add_capability("match.v1");
   f->add_capability("match.backup.v1");
   f->add_capability("match.resume.v1");
+  f->add_capability("match.backup_parts.v1");
   f->add_capability("maps.workshop.v1");
   f->add_capability("mode.wingman.v1");
   f->add_capability("mode.simulation.v1");

@@ -232,4 +232,26 @@ constexpr long long kLiveBackupSlackMs = 2000;
 bool LiveSessionBackup(const std::string& fileName, const std::string& prefix, long long mtimeMs,
                        long long liveSinceMs);
 
+// backup.part (platform -> server): a round backup the platform sends in parts before a failover
+// match.assign that names it by backup_ref (too large to go inline). Kept in memory by sha256 until
+// the assign takes it: at most 4 files, 16 MiB, two minutes after the last part.
+class BackupParts {
+ public:
+  // One inlineBackup part ({file, size, sha256, data, part, parts, ...}); false + why when invalid.
+  bool Add(const Json& backup, double now, std::string* why);
+  // The whole file once every part is there and it matches size and sha256 (then forgotten).
+  bool Take(const std::string& sha256, double now, std::string* raw);
+
+ private:
+  struct File {
+    std::string name;
+    long long size = 0;
+    int parts = 0;
+    std::map<int, std::string> got;
+    double last = 0;
+  };
+  void Expire(double now);
+  std::map<std::string, File> files_;
+};
+
 }  // namespace readyup::fleetstate

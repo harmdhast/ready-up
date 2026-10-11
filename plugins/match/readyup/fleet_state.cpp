@@ -1102,4 +1102,80 @@ bool SafeBackupFileName(const std::string& name) {
   return true;
 }
 
+namespace {
+constexpr double kPartsTtlS = 120.0;
+constexpr size_t kPartsMaxFiles = 4;
+constexpr long long kPartsMaxBytes = 16LL * 1024 * 1024;
+}  // namespace
+
+void BackupParts::Expire(double now) {
+  for (auto it = files_.begin(); it != files_.end();) {
+    if (now - it->second.last > kPartsTtlS) it = files_.erase(it);
+    else ++it;
+  }
+}
+
+bool BackupParts::Add(const Json& backup, double now, std::string* why) {
+  Expire(now);
+  const Json* file = backup.Find("file");
+  const Json* size = backup.Find("size");
+  const Json* sha = backup.Find("sha256");
+  const Json* data = backup.Find("data");
+  const Json* part = backup.Find("part");
+  const Json* parts = backup.Find("parts");
+  const std::string name = file ? file->AsString() : "";
+  const std::string hash = sha ? sha->AsString() : "";
+  const long long total = size ? size->AsInt() : 0;
+  const int n = parts ? static_cast<int>(parts->AsInt()) : 1;
+  const int k = part ? static_cast<int>(part->AsInt()) : 1;
+  if (!SafeBackupFileName(name) || hash.size() != 64 || total < 1 || total > 4 * 1024 * 1024 || n < 1 || n > 64 ||
+      k < 1 || k > n || !data) {
+    *why = "bad backup part";
+    return false;
+  }
+  std::string raw;
+  if (!Base64Decode(data->AsString(), &raw) || raw.empty()) {
+    *why = "bad base64";
+    return false;
+  }
+  long long held = 0;
+  for (const auto& kv : files_)
+    for (const auto& p : kv.second.got) held += static_cast<long long>(p.second.size());
+  if (held + static_cast<long long>(raw.size()) > kPartsMaxBytes) {
+    *why = "too much backup data waiting";
+    return false;
+  }
+  auto it = files_.find(hash);
+  if (it == files_.end()) {
+    if (files_.size() >= kPartsMaxFiles) {
+      auto oldest = files_.begin();
+      for (auto j = files_.begin(); j != files_.end(); ++j)
+        if (j->second.last < oldest->second.last) oldest = j;
+      files_.erase(oldest);
+    }
+    it = files_.emplace(hash, File{name, total, n, {}, now}).first;
+  }
+  File& f = it->second;
+  if (f.parts != n || f.size != total) {
+    *why = "parts disagree on the file";
+    return false;
+  }
+  f.got[k] = std::move(raw);
+  f.last = now;
+  return true;
+}
+
+bool BackupParts::Take(const std::string& sha256, double now, std::string* raw) {
+  Expire(now);
+  auto it = files_.find(sha256);
+  if (it == files_.end() || static_cast<int>(it->second.got.size()) != it->second.parts) return false;
+  std::string whole;
+  for (const auto& p : it->second.got) whole += p.second;
+  const bool ok = static_cast<long long>(whole.size()) == it->second.size && Sha256Hex(whole) == sha256;
+  files_.erase(it);
+  if (!ok) return false;
+  *raw = std::move(whole);
+  return true;
+}
+
 }  // namespace readyup::fleetstate

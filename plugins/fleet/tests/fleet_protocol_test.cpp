@@ -105,6 +105,8 @@ int main() {
     p->Get("ops")->a[0].Set("op", Value::Str("teleport"));
   }));
   CHECK(broken("cmd.pause.json", [](Value* p) { p->Set("name", Value::Str("rm_rf")); }));
+  CHECK(broken("backup.part.json", [](Value* p) { p->Get("backup")->Set("file", Value::Str("../x.txt")); }));
+  CHECK(broken("backup.part.json", [](Value* p) { p->Set("match_id", Value::Int(1)); }));
   CHECK(broken("cmd.result.json", [](Value* p) { p->Set("status", Value::Str("maybe")); }));
   CHECK(broken("state.patch.json", [](Value* p) { p->Set("rev", Value::Int(0)); }));
   CHECK(broken("event.pause.json", [](Value* p) { p->Get("data")->Set("type", Value::Str("coffee")); }));
