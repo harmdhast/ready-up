@@ -104,6 +104,19 @@ optional) is now filled from the core's latest selftest (ru_api 1.11 `selftest_s
 the outcome changes (pass/fail, counts, failing checks; a re-run with the same outcome is not
 sent). Examples: `examples/v1/{hello.selftest,server.selftest}.json`.
 
+## Console logs: proposed here — the platform must adopt them
+
+**Status: proposed — platform must adopt.** FLEET.md §7.6: a live console stream of a fleet server
+(capability `logs.v1`).
+
+| File | Direction | Delivery | Answer |
+|---|---|---|---|
+| `messages/logs.start.json` | platform → server | ephemeral | `logs.lines` (backlog first) |
+| `messages/logs.stop.json` | platform → server | ephemeral | |
+| `messages/logs.lines.json` | server → platform | ephemeral | |
+
+Examples: `examples/v1/logs.{start,stop,lines}.json`.
+
 ## Tests
 
 - `fleet_protocol` (`tests/fleet_protocol_test.cpp`): every schema loads and every example frame in
