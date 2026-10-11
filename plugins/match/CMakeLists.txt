@@ -253,3 +253,10 @@ add_executable(match_retention_test tests/retention_test.cpp readyup/retention_r
 target_include_directories(match_retention_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_options(match_retention_test PRIVATE -Wall -Wextra)
 add_test(NAME match_retention COMMAND match_retention_test)
+
+# Fleet live log (readyup/log_relay.h): redaction, line cap, ring, batching and expiry
+# (ctest `match_log_relay`).
+add_executable(match_log_relay_test tests/log_relay_test.cpp readyup/log_relay.cpp)
+target_include_directories(match_log_relay_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_options(match_log_relay_test PRIVATE -Wall -Wextra)
+add_test(NAME match_log_relay COMMAND match_log_relay_test)
