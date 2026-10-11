@@ -51,9 +51,9 @@ read_version_file() {
   tr -d ' \t\r\n' <"$ROOT_DIR/VERSION"
 }
 
-# X.Y.Z, optionally -beta.N or -rc.N (N >= 1). No leading zeros (SemVer 2.0.0).
+# X.Y.Z, optionally -beta.N or -rc.N, optionally -custom.N (fork builds) (N >= 1). No leading zeros (SemVer 2.0.0).
 NUM='(0|[1-9][0-9]*)'
-SEMVER_RE="^${NUM}\.${NUM}\.${NUM}(-(beta|rc)\.[1-9][0-9]*)?$"
+SEMVER_RE="^${NUM}\.${NUM}\.${NUM}(-(beta|rc)\.[1-9][0-9]*)?(-custom\.[1-9][0-9]*)?$"
 validate_semver() {
   [[ "$1" =~ $SEMVER_RE ]]
 }

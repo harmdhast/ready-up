@@ -47,9 +47,10 @@ jobs:
           file_version="$(tr -d ' \t\r\n' < VERSION)"
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
             version="${GITHUB_REF_NAME#v}"
-            # Stable X.Y.Z or a pre-release X.Y.Z-beta.N / X.Y.Z-rc.N (release.sh, docs/RELEASING.md).
-            if ! echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-(beta|rc)\.[1-9][0-9]*)?$'; then
-              echo "::error::tag $GITHUB_REF_NAME is not vX.Y.Z, vX.Y.Z-beta.N or vX.Y.Z-rc.N"
+            # Stable X.Y.Z or a pre-release X.Y.Z-beta.N / X.Y.Z-rc.N (release.sh, docs/RELEASING.md),
+            # optionally with a fork build suffix -custom.N (FORK.md).
+            if ! echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-(beta|rc)\.[1-9][0-9]*)?(-custom\.[1-9][0-9]*)?$'; then
+              echo "::error::tag $GITHUB_REF_NAME is not vX.Y.Z[-beta.N|-rc.N][-custom.N]"
               exit 1
             fi
             # The tag is the version: a release is just a tag on master (no VERSION bump PR).

@@ -33,7 +33,14 @@ BUILDID="" PATCH_VERSION=""
 # shellcheck disable=SC1090
 [[ -n "$ENV_FILE" && -f "$ENV_FILE" ]] && source "$ENV_FILE"
 
-INSTALL_URL="https://raw.githubusercontent.com/Auto-Tournament/ready-up/master/install.sh"
+REPO="${GITHUB_REPOSITORY:-Auto-Tournament/ready-up}"
+INSTALL_URL="https://raw.githubusercontent.com/$REPO/master/install.sh"
+INSTALL_ENV=""
+# A fork's release: the installer fetches from the fork only with READYUP_REPO.
+if [[ "$REPO" != "Auto-Tournament/ready-up" ]]; then
+  INSTALL_URL="https://raw.githubusercontent.com/$REPO/$TAG/install.sh"
+  INSTALL_ENV="READYUP_REPO=$REPO "
+fi
 
 if [[ $PRERELEASE -eq 1 ]]; then
   cat <<EOF
@@ -57,13 +64,13 @@ EOF
 if [[ $PRERELEASE -eq 1 ]]; then
   cat <<EOF
 \`\`\`bash
-curl -fsSL $INSTALL_URL | bash -s -- --version $TAG
+curl -fsSL $INSTALL_URL | ${INSTALL_ENV}bash -s -- --version $TAG
 \`\`\`
 EOF
 else
   cat <<EOF
 \`\`\`bash
-curl -fsSL $INSTALL_URL | bash
+curl -fsSL $INSTALL_URL | ${INSTALL_ENV}bash
 \`\`\`
 EOF
 fi
