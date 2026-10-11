@@ -5,6 +5,7 @@
 // A stream runs from Start() until 90 s without a renewing Start(). Start(now, true) queues the
 // ring as one backlog batch, delivered by the next Take() outside the spacing and the rate cap.
 
+#include <cstddef>
 #include <deque>
 #include <optional>
 #include <string>

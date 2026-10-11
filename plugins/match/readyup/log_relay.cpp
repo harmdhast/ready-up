@@ -11,7 +11,7 @@ bool IsWord(char c) { return std::isalnum(static_cast<unsigned char>(c)) != 0 ||
 
 bool IsSpace(char c) { return c == ' ' || c == '\t'; }
 
-bool TokenChar(char c) { return IsWord(c) || c == '-' || c == '=' || c == '+' || c == '/'; }
+bool TokenChar(char c) { return IsWord(c) || c == '-' || c == '=' || c == '+' || c == '/' || c == '.'; }
 
 bool MatchesNoCase(std::string_view s, size_t at, const char* word, size_t n) {
   if (at + n > s.size()) return false;
@@ -36,8 +36,14 @@ std::string RedactCvars(std::string_view s) {
         size_t j = start + n;
         if (j < s.size() && IsWord(s[j])) continue;
         size_t v = j;
+        if (v < s.size() && s[v] == '"') ++v;
+        const size_t sep = v;
         while (v < s.size() && IsSpace(s[v])) ++v;
-        if (v == j || v >= s.size()) continue;
+        if (v < s.size() && s[v] == '=') {
+          ++v;
+          while (v < s.size() && IsSpace(s[v])) ++v;
+        }
+        if (v == sep || v >= s.size()) continue;
         size_t end = v;
         if (s[v] == '"') {
           end = s.find('"', v + 1);
@@ -45,8 +51,8 @@ std::string RedactCvars(std::string_view s) {
         } else {
           while (end < s.size() && !IsSpace(s[end])) ++end;
         }
-        out.append(s.substr(i, j - i));
-        out.append(" ***");
+        out.append(s.substr(i, v - i));
+        out.append("***");
         i = end;
         matched = true;
         break;
@@ -98,7 +104,7 @@ void LogRelay::Push(std::string_view line, double now) {
   std::string s = Truncate(RedactLogLine(line));
   ring_.push_back(s);
   if (ring_.size() > kLogRingLines) ring_.pop_front();
-  if (!Active(now)) return;
+  if (!Active(now) || backlogPending_) return;
   if (now - windowStart_ >= 1.0 || now < windowStart_) {
     windowStart_ = now;
     windowCount_ = 0;

@@ -27,6 +27,12 @@ static void RedactsSecrets() {
   CHECK(RedactLogLine("Authorization: Bearer xyz") == "Authorization: Bearer ***");
   CHECK(RedactLogLine("RCON_PASSWORD x") == "RCON_PASSWORD ***");
   CHECK(RedactLogLine("say hello") == "say hello");
+  CHECK(RedactLogLine("\"sv_password\" = \"secret\"") == "\"sv_password\" = ***");
+  CHECK(RedactLogLine("rcon_password = \"x\"") == "rcon_password = ***");
+  CHECK(RedactLogLine("\"rcon_password\" = \"x y\" ( def. \"\" )") == "\"rcon_password\" = *** ( def. \"\" )");
+  CHECK(RedactLogLine("\"sv_setsteamaccount\" = \"TOK\"") == "\"sv_setsteamaccount\" = ***");
+  CHECK(RedactLogLine("readyup_license_key=RUE-AB") == "readyup_license_key=***");
+  CHECK(RedactLogLine("Bearer a.b.c") == "Bearer ***");
   CHECK(RedactLogLine("my_sv_password x") == "my_sv_password x");
 }
 
@@ -123,13 +129,13 @@ static void ExpiresWithoutRenew() {
   CHECK(r.Active(200));
 }
 
-static void StopClearsQueue() {
+static void BacklogDoesNotRepeat() {
   LogRelay r;
-  r.Start(0, false);
   r.Push("a", 0);
-  r.Stop();
-  CHECK(!r.Active(0));
-  r.Start(1, false);
+  r.Start(1, true);
+  r.Push("b", 1);
+  auto b = r.Take(1);
+  CHECK(b && b->backlog && b->lines.size() == 2);
   CHECK(!r.Take(2));
 }
 
@@ -140,7 +146,7 @@ int main() {
   StreamsAfterStart();
   RateCapCountsDropped();
   ExpiresWithoutRenew();
-  StopClearsQueue();
+  BacklogDoesNotRepeat();
   if (g_failures) {
     std::fprintf(stderr, "%d check(s) failed\n", g_failures);
     return 1;
