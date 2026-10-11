@@ -100,10 +100,12 @@ void ModesOnEngineGameOver(int ctScore, int tScore);
 // baselines and the warmup rules over it.
 void ModesOnMapLoaded();
 
-// A human joined CT or T (engine player_team). In match warmup the round is one long round, so a
-// player who joins (or is moved by the team lock) mid-round stays dead until it ends; the warmup
-// round is restarted shortly after so everyone spawns. Debounced. Game thread.
-void ModesOnHumanJoinedTeam(int team);
+// A human joined CT or T (engine player_team, or a team-lock move). In match warmup the round is one
+// long round, so a player who joins mid-round stays dead until it ends: 0.5 s later the joiner is
+// respawned alone (ru_api 1.14 player_respawn). Without it, or when it is refused, the warmup round
+// is restarted so everyone spawns (debounced). Only in the match warmup itself: nothing once going
+// live was triggered or in a recovered live map's gate. Game thread.
+void ModesOnHumanJoinedTeam(int slot, uint64_t steamid, int team);
 
 // Map/series end (match_end.cpp, game thread, outside the modes mutex):
 // - ModesBeginNextMapWarmup: postgame -> match warmup for the next map of the series (not

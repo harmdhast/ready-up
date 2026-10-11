@@ -441,13 +441,17 @@ bool MergeEngineSurface(EngineSurface* base, const EngineSurface& frag, std::str
     if (base->Find(f.name)) return dup("function", f.name);
   for (const auto& v : frag.vtables)
     if (base->FindVtable(v.name)) return dup("vtable", v.name);
-  for (const auto& r : frag.rtti)
-    if (base->FindRtti(r.cls)) return dup("rtti", r.cls);
+  std::vector<RttiSpec> rtti;
+  for (const auto& r : frag.rtti) {
+    const RttiSpec* have = base->FindRtti(r.cls);
+    if (!have) rtti.push_back(r);
+    else if (have->typeinfo_name != r.typeinfo_name || have->module != r.module) return dup("rtti", r.cls);
+  }
   for (const auto& l : frag.layouts)
     if (base->FindLayout(l.name)) return dup("layout", l.name);
   base->functions.insert(base->functions.end(), frag.functions.begin(), frag.functions.end());
   base->vtables.insert(base->vtables.end(), frag.vtables.begin(), frag.vtables.end());
-  base->rtti.insert(base->rtti.end(), frag.rtti.begin(), frag.rtti.end());
+  base->rtti.insert(base->rtti.end(), rtti.begin(), rtti.end());
   base->layouts.insert(base->layouts.end(), frag.layouts.begin(), frag.layouts.end());
   return true;
 }

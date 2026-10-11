@@ -300,6 +300,29 @@ class CompatReportTest(unittest.TestCase):
         for pid, need in cr.load_needs(str(ROOT / "plugins")).items():
             self.assertFalse((fns | slots) & set(need.get("surface") or []), pid)
 
+    def test_respawn_is_core_and_never_a_hard_need(self):
+        """ru_api 1.14 player_respawn: SetPawn and the Respawn slot are the core's, optional, named by
+        the core's feature table, and no plugin lists them in "surface"."""
+        files = cr.surface_files(str(ROOT / "gamedata"))
+        owner, _ = cr.ownership(files)
+        spec = (ROOT / "core" / "src" / "readyup" / "practice_engine_spec.h").read_text()
+        core = json.loads((ROOT / "gamedata" / "engine-surface.json").read_text())
+        entries = {"CBasePlayerController_SetPawn", "CCSPlayerController::Respawn"}
+        for k in entries:
+            self.assertIn('"%s"' % k, spec, k)
+        self.assertEqual(owner.get(("signature", "CBasePlayerController_SetPawn")), "core")
+        self.assertEqual(owner.get(("rtti", "CCSPlayerController")), "core")
+        fn = core["functions"]["CBasePlayerController_SetPawn"]
+        self.assertFalse(fn["required"])
+        self.assertGreaterEqual(len(fn["anchors"]), 2)
+        vt = core["vtable_indices"]["CCSPlayerController::Respawn"]
+        self.assertIn(vt["class"], core["rtti"])
+        self.assertGreaterEqual(len(vt["anchors"]), 2)
+        self.assertIn("player_respawn", cr.API_SURFACE)
+        self.assertFalse(entries & set(cr.API_SURFACE["player_respawn"]))
+        for pid, need in cr.load_needs(str(ROOT / "plugins")).items():
+            self.assertFalse(entries & set(need.get("surface") or []), pid)
+
     # ---- plugin needs (plugins/<id>/needs.json) ------------------------------------------------
 
     def test_plugin_static_verdicts_from_needs(self):

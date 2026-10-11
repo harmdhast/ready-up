@@ -133,7 +133,7 @@ def ownership(files):
                 owner[("hook_site", name)] = cid
                 hooked.add(name)
         for name in (d.get("rtti") or {}):
-            owner[("rtti", name)] = cid
+            owner.setdefault(("rtti", name), cid)  # a fragment repeating the base's entry shares it
         for name in (d.get("vtable_indices") or {}):
             owner[("vtable", name)] = cid
         for name in (d.get("layouts") or {}):
@@ -346,6 +346,9 @@ API_SURFACE = {
     "player_teleport": _ENTSYS,
     "entity_create": _ENTSYS,
     "entity_spawn": _ENTSYS,
+    # 1.14: SetPawn / CCSPlayerController::Respawn are core entries, optional for the same reason
+    # (a break turns respawn off, engine_feature_available("respawn") = 0).
+    "player_respawn": _ENTSYS,
     "set_round_termination_suppressed": ["CCSGameRules_TerminateRound"],
 }
 NEEDS_KEYS = ("schema_version", "plugin", "api", "surface", "schema", "schema_optional", "events")

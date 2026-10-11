@@ -424,6 +424,12 @@ target_include_directories(readyup_practice_engine_spec_test PRIVATE ${CMAKE_SOU
 target_compile_options(readyup_practice_engine_spec_test PRIVATE -Wall -Wextra)
 add_test(NAME practice_engine_spec COMMAND readyup_practice_engine_spec_test)
 
+# Gamedata fragment merge rules (core/src/readyup/engine_surface_core.cpp).
+add_executable(readyup_engine_surface_merge_test tests/engine_surface_merge_test.cpp core/src/readyup/engine_surface_core.cpp libs/readyup/minijson.cpp)
+target_include_directories(readyup_engine_surface_merge_test PRIVATE ${CMAKE_SOURCE_DIR}/core/src ${CMAKE_SOURCE_DIR}/libs)
+target_compile_options(readyup_engine_surface_merge_test PRIVATE -Wall -Wextra)
+add_test(NAME engine_surface_merge COMMAND readyup_engine_surface_merge_test)
+
 # Player headers of server log lines (core/src/readyup/log_header.h).
 add_executable(readyup_log_header_test tests/log_header_test.cpp)
 target_include_directories(readyup_log_header_test PRIVATE ${CMAKE_SOURCE_DIR}/core/src)

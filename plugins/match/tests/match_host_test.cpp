@@ -18,6 +18,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdarg>
@@ -113,6 +114,10 @@ struct FakePlayer {
 };
 // player_change_team reports success but leaves the team as is (a full team, a refused move).
 static bool g_refuseTeamChange = false;
+// engine_feature_available("respawn"); the slots player_respawn was called for.
+static bool g_respawnAvailable = true;
+static std::vector<int> g_respawned;
+static int g_respawnRc = 1;  // player_respawn: 1 respawned, 2 already alive, 0 refused
 static std::vector<FakePlayer> g_players = {
     {2, 2, 76561198000000001ull, 3, false, "alice"},
 };
@@ -184,6 +189,13 @@ void FillEngineApi(ru_api* a) {
       }
     }
     return 0;
+  };
+  a->engine_feature_available = [](ru_plugin*, const char* f) {
+    return std::strcmp(f, "respawn") == 0 && g_respawnAvailable ? 1 : 0;
+  };
+  a->player_respawn = [](ru_plugin*, int slot) {
+    g_respawned.push_back(slot);
+    return g_respawnRc;
   };
   a->ev_get_int = [](ru_plugin*, const ru_game_event*, const char*, int def) { return def; };
   a->ev_get_float = [](ru_plugin*, const ru_game_event*, const char*, double def) { return def; };
@@ -753,6 +765,90 @@ int main(int argc, char** argv) {
   (void)FramesUntil([] { return false; }, 2000);
   Check(CountLogged("ready: moved bob to T") == 1, "a landed move is logged once");
 
+  std::puts("-- team lock in match warmup: a forced move respawns the player");
+  auto respawned = [](int slot) { return std::find(g_respawned.begin(), g_respawned.end(), slot) != g_respawned.end(); };
+  ClearLog();
+  ClearCmds();
+  g_respawned.clear();
+  g_players.back().team = 0;
+  g_refuseTeamChange = true;
+  Check(FramesUntil([] { return Logged("ready: could not move bob to T"); }, 3000), "a refused move is still attempted");
+  Check(!FramesUntil([&] { return Sent("mp_restartgame 1") || respawned(3); }, 3000),
+        "a refused move neither respawns nor restarts the warmup round");
+  g_refuseTeamChange = false;
+  ClearLog();
+  Check(FramesUntil([] { return Logged("ready: moved bob to T"); }, 6000), "bob on no team is moved to his side");
+  Check(FramesUntil([&] { return respawned(3); }, 3000), "the forced move respawns bob");
+  Check(!Sent("mp_restartgame 1"), "no warmup round restart when respawn is available");
+
+  std::puts("-- team lock: a joiner who is gone before the respawn is left alone");
+  ClearLog();
+  g_respawned.clear();
+  g_players.back().team = 0;
+  Check(FramesUntil([] { return Logged("ready: moved bob to T"); }, 6000), "bob is moved again");
+  g_players.back().team = 1;  // back in the spectators before the deferred respawn
+  g_refuseTeamChange = true;
+  Check(!FramesUntil([&] { return respawned(3); }, 2000), "a joiner no longer on T / CT is not respawned");
+  g_refuseTeamChange = false;
+
+  std::puts("-- team lock + the engine's player_team for the same move: one respawn");
+  ClearLog();
+  g_respawned.clear();
+  g_players.back().team = 0;
+  Check(FramesUntil([] { return Logged("ready: moved bob to T"); }, 6000), "bob is moved");
+  {
+    rp::LifecycleEvent ev;
+    ev.type = RU_EVENT_PLAYER_TEAM;
+    ev.source = RU_SOURCE_ENGINE;
+    ev.slot = 3;
+    ev.steamid64 = 76561198000000002ull;
+    ev.name = "bob";
+    ev.team = 2;
+    rp::PostEvent(ev);
+  }
+  (void)FramesUntil([] { return false; }, 1500);
+  Check(std::count(g_respawned.begin(), g_respawned.end(), 3) == 1, "the move and its player_team event respawn bob once");
+
+  std::puts("-- another player in the joiner's slot before the respawn is left alone");
+  ClearLog();
+  g_respawned.clear();
+  g_players.back().team = 0;
+  Check(FramesUntil([] { return Logged("ready: moved bob to T"); }, 6000), "bob is moved again");
+  g_players.back().steamid64 = 76561198000000009ull;  // bob left, someone else got slot 3 (on T)
+  g_refuseTeamChange = true;
+  Check(!FramesUntil([&] { return respawned(3); }, 2000), "a different player in the slot is not respawned");
+  g_players.back().steamid64 = 76561198000000002ull;
+  g_refuseTeamChange = false;
+
+  std::puts("-- team lock: an already alive player is left alone, a refused respawn restarts the round");
+  ClearLog();
+  ClearCmds();
+  g_respawned.clear();
+  g_respawnRc = 2;
+  g_players.back().team = 0;
+  Check(FramesUntil([&] { return respawned(3); }, 6000), "player_respawn is tried for the moved player");
+  Check(!FramesUntil([] { return Sent("mp_restartgame 1"); }, 2500), "an already alive player does not restart the round");
+  ClearLog();
+  ClearCmds();
+  g_respawned.clear();
+  g_respawnRc = 0;
+  g_players.back().team = 0;
+  Check(FramesUntil([&] { return respawned(3); }, 6000), "player_respawn is tried again");
+  Check(FramesUntil([] { return Sent("mp_restartgame 1"); }, 3000), "a refused respawn falls back to the warmup round restart");
+  g_respawnRc = 1;
+  (void)FramesUntil([] { return false; }, 4500);  // past the restart debounce
+
+  std::puts("-- team lock without respawn: a forced move restarts the warmup round");
+  ClearLog();
+  ClearCmds();
+  g_respawned.clear();
+  g_respawnAvailable = false;
+  g_players.back().team = 0;
+  Check(FramesUntil([] { return Logged("ready: moved bob to T"); }, 6000), "bob is moved to his side");
+  Check(FramesUntil([] { return Sent("mp_restartgame 1"); }, 3000), "the forced move restarts the warmup round");
+  Check(g_respawned.empty(), "player_respawn is not called without the feature");
+  g_respawnAvailable = true;
+
   std::puts("-- round restore: backups list, refusals, ru_pause_after_restore");
   ClearLog();
   rp::TryDispatchRu(true, 0, "Console", "ru match backups");
@@ -826,6 +922,21 @@ int main(int argc, char** argv) {
   Check(Logged("whitelist_enabled_default = off (runtime)"), "ru settings set");
   Check(Logged("playout_enabled_default = off"), "ru settings default");
   Check(Logged("series_end_kick_delay_no_demo = 12"), "ru settings set takes the kick delays too");
+
+  std::puts("-- go-live pending (still match warmup): a join neither respawns nor restarts");
+  ClearLog();
+  ClearCmds();
+  rp::TryDispatchChat(76561198000000001ull, "alice", ".ready", 2);
+  rp::Frame(true);
+  Check(FramesUntil([] { return Sent("mp_restartgame 1"); }, 3000), "all ready: going live");
+  Check(Has(Summary(), "\"ru_mode\":\"match_warmup\""), "match warmup until the live round starts");
+  ClearLog();
+  ClearCmds();
+  g_respawned.clear();
+  g_players.back().team = 0;
+  Check(FramesUntil([] { return Logged("ready: moved bob to T"); }, 6000), "the team lock still moves bob");
+  Check(!FramesUntil([&] { return respawned(3) || Sent("mp_restartgame 1"); }, 2500),
+        "no respawn and no extra restart while going live");
 
   std::puts("-- unload");
   ClearLog();

@@ -1,7 +1,7 @@
 #pragma once
 
 // Pure rules of ru_api 1.13 (player_change_team, player_teleport, entity_create, entity_spawn,
-// engine_feature_available), kept free of engine code so they are unit tested
+// engine_feature_available) and 1.14 (player_respawn), kept free of engine code so they are unit tested
 // (tests/practice_engine_spec_test.cpp): which engine-surface entries each feature needs and which
 // requests are refused before any engine call.
 
@@ -12,7 +12,7 @@ namespace readyup::practice_engine {
 
 struct FeatureInfo {
   const char* name;      // engine_feature_available(name)
-  const char* function;  // gamedata/engine-surface.practice.json "functions" key
+  const char* function;  // "functions" key of the verified function behind it, or nullptr (vtable slot only)
   const char* function2; // a second function it needs, or nullptr
   const char* vtable;    // "vtable_indices" key checked before each call, or nullptr
 };
@@ -23,6 +23,7 @@ inline const FeatureInfo* Feature(const char* name) {
       {"change_team", "CCSPlayerController_ChangeTeam", nullptr, "CCSPlayerController::ChangeTeam"},
       {"teleport", "CCSPlayerPawn_Teleport", nullptr, "CCSPlayerPawn::Teleport"},
       {"entity_create", "UTIL_CreateEntityByName", "CBaseEntity_DispatchSpawn", nullptr},
+      {"respawn", nullptr, "CBasePlayerController_SetPawn", "CCSPlayerController::Respawn"},
   };
   if (!name) return nullptr;
   for (const auto& f : k) {
@@ -33,6 +34,13 @@ inline const FeatureInfo* Feature(const char* name) {
 
 // player_change_team: 1 = spectators, 2 = T, 3 = CT.
 inline bool ValidTeam(int team) { return team >= 1 && team <= 3; }
+
+// player_respawn: a dead player on T (2) or CT (3). Why it is refused, or nullptr.
+inline const char* ValidateRespawn(int team, bool alive) {
+  if (team != 2 && team != 3) return "the player is not on T or CT";
+  if (alive) return "the player is alive";
+  return nullptr;
+}
 
 // player_teleport. Each part may be null (left alone), not all three. Why it is refused, or nullptr.
 constexpr float kMaxCoord = 32768.f;  // off any map beyond this

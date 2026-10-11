@@ -19,9 +19,11 @@ void* Controller(int slot) {
 
 // The object must be what the vtable entry is about (its vptr == the RTTI-located vtable) and the
 // slot must hold the verified function. Returns that function, or nullptr with *why.
+// A vtable entry without a function is trusted on its anchors alone: the call goes to the slot's
+// verified target.
 void* VerifiedVirtual(const FeatureInfo& f, const void* obj, std::string* why) {
-  void* fn = EngineFunction(f.function);
-  if (!fn) {
+  void* fn = f.function ? EngineFunction(f.function) : nullptr;
+  if (f.function && !fn) {
     if (why) *why = "not available on this CS2 build (its gamedata did not verify, or the practice gamedata is not installed)";
     return nullptr;
   }
@@ -31,14 +33,14 @@ void* VerifiedVirtual(const FeatureInfo& f, const void* obj, std::string* why) {
     if (why) *why = std::string(f.vtable) + " did not verify: " + detail;
     return nullptr;
   }
-  return fn;
+  return fn ? fn : reinterpret_cast<void*>(EngineVtableVerdict(f.vtable).target);
 }
 
 }  // namespace
 
 bool Available(const char* feature) {
   const FeatureInfo* f = Feature(feature);
-  if (!f || !EngineFunction(f->function)) return false;
+  if (!f || (f->function && !EngineFunction(f->function))) return false;
   if (f->function2 && !EngineFunction(f->function2)) return false;
   int index = -1;
   std::string detail;
@@ -88,6 +90,40 @@ bool Teleport(int slot, const float* origin, const float* angles, const float* v
   using Fn = void (*)(void*, const float*, const float*, const float*);
   reinterpret_cast<Fn>(fn)(pawn, origin ? o : nullptr, angles ? a : nullptr, velocity ? v : nullptr);
   return true;
+}
+
+int Respawn(int slot, std::string* why) {
+  auto fail = [&](const std::string& w) {
+    if (why) *why = w;
+    return 0;
+  };
+  void* ctrl = Controller(slot);
+  if (!ctrl) return fail("slot " + std::to_string(slot) + " is not a player");
+  const auto teamOff = SchemaFindOffset("server", "CBaseEntity", "m_iTeamNum");
+  const auto pawnOff = SchemaFindOffset("server", "CCSPlayerController", "m_hPlayerPawn");
+  const auto lifeOff = SchemaFindOffset("server", "CBaseEntity", "m_lifeState");
+  if (!teamOff || !pawnOff || !lifeOff) return fail("schema not ready");
+  uint32_t pawnHandle = 0;
+  std::memcpy(&pawnHandle, static_cast<const char*>(ctrl) + *pawnOff, sizeof(pawnHandle));
+  void* pawn = entity::EntityFromHandle(pawnHandle);
+  if (!pawn) return fail("the player has no pawn");
+  const int team = static_cast<const unsigned char*>(ctrl)[*teamOff];
+  const bool alive = static_cast<const unsigned char*>(pawn)[*lifeOff] == 0;
+  if (const char* bad = ValidateRespawn(team, false)) return fail(bad);
+  if (alive) return 2;
+  const FeatureInfo& f = *Feature("respawn");
+  void* setPawn = EngineFunction(f.function2);
+  if (!setPawn) return fail("not available on this CS2 build (its gamedata did not verify)");
+  void* fn = VerifiedVirtual(f, ctrl, why);
+  if (!fn) return 0;
+  // CBasePlayerController::SetPawn(this, pawn, bool, bool, bool, bool) with CounterStrikeSharp's
+  // (true, false, false, false): a player who died and watched from the observer pawn owns the
+  // player pawn again, then CCSPlayerController::Respawn(this) respawns that current pawn.
+  using SetPawnFn = void (*)(void*, void*, bool, bool, bool, bool);
+  reinterpret_cast<SetPawnFn>(setPawn)(ctrl, pawn, true, false, false, false);
+  using Fn = void (*)(void*);
+  reinterpret_cast<Fn>(fn)(ctrl);
+  return 1;
 }
 
 void* Create(const char* classname, std::string* why) {
