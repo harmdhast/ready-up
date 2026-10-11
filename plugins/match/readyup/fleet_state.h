@@ -213,6 +213,10 @@ bool SafeMapName(const std::string& name);
 bool SafeWorkshopId(const std::string& id);
 // CS2 round backup files: "<prefix>round07.txt" -> 7; -1 when the name has no round number.
 int BackupRoundFromName(const std::string& fileName);
+// The backup of `roundsPlayed` (it starts round roundsPlayed + 1) is this server's to forward:
+// the round it starts is `firstRound` or later. A failover resume's server played from the resume
+// round on; its go-live round's backup (round00) is not the match's round 1.
+inline bool ForwardsBackup(int roundsPlayed, int firstRound) { return roundsPlayed + 1 >= firstRound; }
 // A backup file name from the platform that is safe to write into csgo/ (no directories,
 // ends in .txt, [A-Za-z0-9_.-] only).
 bool SafeBackupFileName(const std::string& name);

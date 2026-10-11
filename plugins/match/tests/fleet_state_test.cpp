@@ -300,6 +300,12 @@ static void TestAssign() {
   CHECK(fs::NumericMatchId("abc") != 0 && fs::NumericMatchId("abc") < (1ull << 52));
   CHECK(fs::NumericMatchId("abc") == fs::NumericMatchId("abc"));
 
+  // A failover resume at round 6: the go-live round's round00 backup is not forwarded.
+  CHECK(!fs::ForwardsBackup(0, 6));
+  CHECK(!fs::ForwardsBackup(4, 6));
+  CHECK(fs::ForwardsBackup(5, 6));
+  CHECK(fs::ForwardsBackup(0, 1));
+
   // Hand-over membership (D16).
   const Json& cfg = *p.Find("config");
   CHECK(fs::InAssignedMatch(cfg, 76561198000000001ull));
