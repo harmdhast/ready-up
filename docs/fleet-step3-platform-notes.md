@@ -68,7 +68,8 @@ Table `match_live_state (match_id, epoch, server_id, live_rev, config_rev, state
 - `match_id` = the match slug (`^[A-Za-z0-9_.:-]{1,64}$`), `epoch` ≥ 1, bumped on every
   (re)assignment of that match; keep the highest epoch per match (fencing, §11.4).
 - `config_rev` (new, default 1): the platform's config counter, the base for `match.update`.
-- `config` from `matchConfig.ts`: `num_maps`, `maps[] {name, workshop_id?, sides}` (sides from the
+- `config` from `matchConfig.ts`: `id` (the match's numeric id, unique per platform: slugs
+  like `r1m1` repeat across tournaments and would share round backup names), `num_maps`, `maps[] {name, workshop_id?, sides}` (sides from the
   veto: `team1_ct` | `team2_ct` | `knife`; a workshop map is `workshop_id` + its name, or a name
   `ws:<id>` / `workshop/<id>[/<name>]` / all digits: Ready Up loads it with `host_workshop_map`), `team1/team2 {id, name, tag?, captain?, players[]
   {steamid64 (string), name, role: player|sub|coach}}`, `spectators[]`, `admins[]`,

@@ -669,6 +669,8 @@ match.assign {
   match_id: string                 // platform match slug
   epoch: number                    // ≥ 1, bumped on every (re)assignment
   config: {
+    id?: number                    // platform's numeric match id (1..2^52-1), unique where slugs
+                                   // repeat; names round backups and demos (absent: hash of match_id)
     num_maps: 1 | 2 | 3 | 5
     maps: Array<{ number: number, name: string, workshop_id?: string, sides: "team1_ct" | "team2_ct" | "knife" }>
     team1: AssignTeam, team2: AssignTeam
