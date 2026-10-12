@@ -464,6 +464,10 @@ Json AssignToMatConfig(const std::string& matchId, const Json& config, std::vect
     if (ready->Find("min_per_team")) cfg["min_players_to_ready"] = Int(*ready, "min_per_team", 0);
     if (ready->Find("autoready")) cfg["autoready"] = Bool(*ready, "autoready", false);
   }
+  if (const Json* st = Obj(r, "stop")) {
+    if (st->Find("enabled")) cfg["stop_command_available"] = Bool(*st, "enabled", false);
+    if (st->Find("no_damage")) cfg["stop_command_no_damage"] = Bool(*st, "no_damage", false);
+  }
   // Server settings the match sets for itself (server_settings.h); absent = the server's value.
   if (r.Find("playout")) cfg["playout"] = Bool(r, "playout", false);
   if (r.Find("whitelist")) cfg["whitelist"] = Bool(r, "whitelist", true);
