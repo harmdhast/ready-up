@@ -251,6 +251,23 @@ static void TestAssign() {
   }
 
   {
+    // rules.stop.enabled / no_damage -> .stop availability; absent stays unset (-1).
+    Json st = *p.Find("config");
+    st["rules"] = J(R"({"max_rounds": 24, "stop": {"enabled": true, "no_damage": true}})");
+    auto s1 = ParseWebhookMatchContextFromJson(fs::AssignToMatConfig("x", st, nullptr).Dump(), &err);
+    CHECK(s1 && s1->rules.stop_command_available == 1 && s1->rules.stop_command_no_damage == 1);
+    st["rules"] = J(R"({"max_rounds": 24, "stop": {"enabled": false, "no_damage": false}})");
+    auto s2 = ParseWebhookMatchContextFromJson(fs::AssignToMatConfig("x", st, nullptr).Dump(), &err);
+    CHECK(s2 && s2->rules.stop_command_available == 0 && s2->rules.stop_command_no_damage == 0);
+    st["rules"] = J(R"({"max_rounds": 24, "stop": {"no_damage": true}})");
+    auto s3 = ParseWebhookMatchContextFromJson(fs::AssignToMatConfig("x", st, nullptr).Dump(), &err);
+    CHECK(s3 && s3->rules.stop_command_available == -1 && s3->rules.stop_command_no_damage == 1);
+    st["rules"] = J(R"({"max_rounds": 24})");
+    auto s4 = ParseWebhookMatchContextFromJson(fs::AssignToMatConfig("x", st, nullptr).Dump(), &err);
+    CHECK(s4 && s4->rules.stop_command_available == -1 && s4->rules.stop_command_no_damage == -1);
+  }
+
+  {
     // Wingman and simulation (wingman.h, simulation.h): rules.wingman, rules.simulation.timescale.
     Json ws = *p.Find("config");
     ws["rules"] = J(R"({"max_rounds": 16, "wingman": true, "simulation": {"timescale": 2}})");

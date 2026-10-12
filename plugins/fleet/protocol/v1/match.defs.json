@@ -209,6 +209,17 @@
             }
           }
         },
+        "stop": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "no_damage": {
+              "type": "boolean"
+            }
+          }
+        },
         "demo": {
           "type": "object",
           "properties": {

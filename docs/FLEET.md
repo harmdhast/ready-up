@@ -131,7 +131,7 @@ Choices made where this document leaves room:
 - Rules enforced from `rules`: `max_rounds`, `overtime`, `tiebreak`, `knife.side_pick_seconds`,
   `clinch_series`, `pause.technical_per_team` / `technical_seconds` / `unpause`,
   `pause.tactical_per_team` / `tactical_seconds` (as `mp_team_timeout_max` / `_time`),
-  `ready.allow_force_ready` / `min_per_team` and `forfeit.team_absent_seconds` (through the MAT
+  `ready.allow_force_ready` / `min_per_team`, `stop.enabled` / `no_damage` and `forfeit.team_absent_seconds` (through the MAT
   config the match flow already loads; `plugins/match/readyup/match_rules.h`). Coaches
   (`role: coach`) are whitelisted spectators who coach their team (CS2's coach slot,
   docs/ADMINS.md "Coaches"); no protocol field beyond the role. The gg-vote rules are carried
@@ -711,6 +711,7 @@ rules {
            technical_seconds?: 300 /* auto-unpause; 0 = none */,
            unpause: "both_teams" | "caller_team", pause_after_restore: true },
   whitelist: true, playout: false, clinch_series: true,
+  stop?: { enabled: boolean, no_damage: boolean },
   forfeit: { team_absent_seconds: 240, gg_vote: { enabled: false, threshold: 0.8, min_score_diff: 8 } },
   demo: { record: true, upload: true },
   wingman: false, simulation?: { timescale: number }
