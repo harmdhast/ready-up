@@ -1848,6 +1848,7 @@ void OnAdminsSet(const ru_fleet_msg* m) {
 // Values masked in the live log: the passwords and license key read from the engine (cvar_query is
 // asynchronous), and the Steam game server token from the command line.
 constexpr double kLogSecretsRefreshS = 60.0;
+constexpr double kLogEchoMuteS = 1.0;
 std::vector<std::string> g_cvarSecrets{"", "", ""};
 std::string g_cmdlineToken;
 bool g_cmdlineRead = false;
@@ -1889,6 +1890,7 @@ void RefreshLogSecrets(double now) {
   }
   if (!g_api || !RU_API_HAS(g_api, cvar_query) || !g_api->cvar_query) return;
   static const char* const kNames[] = {"rcon_password", "sv_password", "readyup_license_key"};
+  g_logRelay.MuteCvarEchoes({kNames[0], kNames[1], kNames[2]}, now + kLogEchoMuteS);
   for (uintptr_t i = 0; i < 3; ++i) g_api->cvar_query(g_api->self, kNames[i], OnSecretCvar, reinterpret_cast<void*>(i));
   ApplyLogSecrets();
 }

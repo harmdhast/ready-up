@@ -181,6 +181,25 @@ static void StripsTrailingNewlines() {
   CHECK(bl && bl->lines.size() == 1);
 }
 
+static void MutesRefreshEchoes() {
+  LogRelay r;
+  r.Start(0, false);
+  r.MuteCvarEchoes({"rcon_password", "sv_password"}, 1.0);
+  r.Push("rcon_password = \"abcd\"", 0.5);
+  r.Push("  \"SV_PASSWORD\" = \"abcd\"", 0.5);
+  r.Push("sv_password : abcd", 0.5);
+  r.Push("rcon_password_x = 1", 0.5);
+  r.Push("hostname : x", 0.5);
+  r.Push("rcon_password = \"abcd\"", 1.5);
+  auto b = r.Take(2);
+  CHECK(b && b->lines.size() == 3);
+  if (b && b->lines.size() == 3) {
+    CHECK(b->lines[0] == "rcon_password_x = 1");
+    CHECK(b->lines[1] == "hostname : x");
+    CHECK(b->lines[2] == "rcon_password = ***");
+  }
+}
+
 int main() {
   RedactsSecrets();
   RedactsColonForms();
@@ -192,6 +211,7 @@ int main() {
   ExpiresWithoutRenew();
   BacklogDoesNotRepeat();
   StripsTrailingNewlines();
+  MutesRefreshEchoes();
   if (g_failures) {
     std::fprintf(stderr, "%d check(s) failed\n", g_failures);
     return 1;
