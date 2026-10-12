@@ -12,6 +12,7 @@
 #include "readyup/esports.h"
 #include "readyup/fleet_state.h"
 #include "readyup/local_store.h"
+#include "readyup/log_relay.h"
 #include "readyup/logging.h"
 #include "readyup/map_names.h"
 #include "readyup/match_config_parser.h"
@@ -43,10 +44,12 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdio>
+#include <cstdint>
 #include <cstring>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <mutex>
 #include <set>
 #include <sstream>
@@ -103,6 +106,7 @@ std::string g_unpauseBy;
 double g_lastPoll = -1e9;
 double g_lastPeriodic = -1e9;
 double g_now = 0;
+LogRelay g_logRelay;
 
 // Deferred work (game thread).
 struct PendingKick {
@@ -1997,7 +2001,10 @@ void OnOfflineTimeout(const ru_fleet_msg*) {
 
 void OnConnection(const ru_fleet_msg* m) {
   Json p = ParsePayload(m);
-  if (Str(p, "state") != "online") return;
+  if (Str(p, "state") != "online") {
+    g_logRelay.Stop();
+    return;
+  }
   // §8.2: the platform gets the current state on every connect (hello carries it too; this one
   // also has map_stats).
   if (g_asg.active) SendSnapshot("hello", true);
@@ -2031,6 +2038,72 @@ void OnAdminsSet(const ru_fleet_msg* m) {
   }
 }
 
+// Values masked in the live log: the passwords and license key read from the engine (cvar_query is
+// asynchronous), and the Steam game server token from the command line.
+constexpr double kLogSecretsRefreshS = 60.0;
+std::vector<std::string> g_cvarSecrets{"", "", ""};
+std::string g_cmdlineToken;
+bool g_cmdlineRead = false;
+double g_logSecretsAt = -1e9;
+
+void ApplyLogSecrets() {
+  std::vector<std::string> all = g_cvarSecrets;
+  all.push_back(g_cmdlineToken);
+  g_logRelay.SetSecrets(std::move(all));
+}
+
+void OnSecretCvar(void* user, const char*, const char* value) {
+  g_cvarSecrets[reinterpret_cast<uintptr_t>(user)] = value ? value : "";
+  ApplyLogSecrets();
+}
+
+std::string SteamTokenFromCmdline() {
+  std::ifstream f("/proc/self/cmdline", std::ios::binary);
+  std::string cmd((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+  std::vector<std::string> args;
+  size_t b = 0;
+  for (size_t i = 0; i <= cmd.size(); ++i) {
+    if (i == cmd.size() || cmd[i] == '\0') {
+      if (i > b) args.push_back(cmd.substr(b, i - b));
+      b = i + 1;
+    }
+  }
+  for (size_t i = 0; i + 1 < args.size(); ++i)
+    if (args[i] == "+sv_setsteamaccount" && args[i + 1][0] != '+' && args[i + 1][0] != '-') return args[i + 1];
+  return "";
+}
+
+void RefreshLogSecrets(double now) {
+  if (now - g_logSecretsAt < kLogSecretsRefreshS) return;
+  g_logSecretsAt = now;
+  if (!g_cmdlineRead) {
+    g_cmdlineRead = true;
+    g_cmdlineToken = SteamTokenFromCmdline();
+  }
+  if (!g_api || !RU_API_HAS(g_api, cvar_query) || !g_api->cvar_query) return;
+  static const char* const kNames[] = {"rcon_password", "sv_password", "readyup_license_key"};
+  for (uintptr_t i = 0; i < 3; ++i) g_api->cvar_query(g_api->self, kNames[i], OnSecretCvar, reinterpret_cast<void*>(i));
+  ApplyLogSecrets();
+}
+
+void OnLogsStart(const ru_fleet_msg* m) {
+  g_logSecretsAt = -1e9;
+  RefreshLogSecrets(g_now);
+  g_logRelay.Start(g_now, Bool(ParsePayload(m), "backlog"));
+}
+
+void SendLogBatches() {
+  while (auto b = g_logRelay.Take(g_now)) {
+    Json lines = Json::Array();
+    for (const auto& l : b->lines) lines.Push(l);
+    Json p = Json::Object();
+    p["lines"] = std::move(lines);
+    p["backlog"] = b->backlog;
+    p["dropped"] = b->dropped;
+    Send("logs.lines", p, 0, false);
+  }
+}
+
 void OnMessage(void*, const ru_fleet_msg* m) {
   if (!m || !m->type) return;
   try {
@@ -2046,6 +2119,8 @@ void OnMessage(void*, const ru_fleet_msg* m) {
     else if (t == "server.config") OnServerConfig(m);
     else if (t == "server.drain") OnDrain(true, m);
     else if (t == "server.undrain") OnDrain(false, m);
+    else if (t == "logs.start") OnLogsStart(m);
+    else if (t == "logs.stop") g_logRelay.Stop();
   } catch (const std::exception& e) {
     Print("fleet: handling %s threw: %s\n", m->type, e.what());
   }
@@ -2065,7 +2140,7 @@ void EnsureHandlers() {
   g_handlerIds.clear();  // a new fleet.so image has no registrations
   for (const char* type : {"match.assign", "match.update", "match.unassign", "backup.part", "cmd", "local.offline_timeout",
                            "local.connection", "admins.set", "server.config", "server.drain",
-                           "server.undrain"}) {
+                           "server.undrain", "logs.start", "logs.stop"}) {
     const uint64_t id = f->register_handler(type, &OnMessage, nullptr);
     if (id) g_handlerIds.push_back(id);
   }
@@ -2078,6 +2153,7 @@ void EnsureHandlers() {
   f->add_capability("maps.workshop.v1");
   f->add_capability("mode.wingman.v1");
   f->add_capability("mode.simulation.v1");
+  f->add_capability("logs.v1");
   PublishAdminsRev();
   // A new fleet.so said hello with its own default (or match_disabled): tell it what is true.
   g_forceAvailNotice = true;
@@ -2177,7 +2253,9 @@ void OnCoreEvent(const ru_event* e) {
 }
 
 void OnLogLine(const char* line) {
-  if (g_execs.empty() || !line) return;
+  if (!line) return;
+  g_logRelay.Push(line, g_now);
+  if (g_execs.empty()) return;
   for (auto& x : g_execs) {
     if (x.output.size() >= kExecOutputMax) continue;
     x.output.append(line);
@@ -2210,6 +2288,8 @@ void Tick(double now) {
     for (const auto& h : ListHumans()) humans.emplace_back(h.steamid64, h.name, h.team);
     if (fs::PlayersJson(humans).Dump() != g_playersSent) (void)SendSnapshot("request", g_asg.active);
   }
+  SendLogBatches();
+  if (g_logRelay.Active(now)) RefreshLogSecrets(now);
   if (!g_asg.active) {
     (void)signals::Take();
     if (f && now - g_lastIdlePublish >= 1.0) {

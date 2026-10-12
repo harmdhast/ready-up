@@ -850,6 +850,24 @@ state.request {}                         // ephemeral, reply state.snapshot
   `hello.host.steam_token: true`; the platform sends it no loadouts and the skins plugin stays
   inert there (Valve bans the token of a server that hands out items players do not own).
 
+### 7.6 Console logs
+
+`logs.start { backlog: boolean }`, `logs.stop {}` (platform → server, ephemeral). The server
+answers with `logs.lines { lines: string[], backlog: boolean, dropped: integer }` (server →
+platform, ephemeral). Capability `logs.v1`; without it the platform answers `unsupported`.
+
+- Any admin can read the live log of any enrolled fleet server, linked or not. Commands stay
+  root only (`exec`, §7.4).
+- On `logs.start { backlog: true }` the server sends the last 200 lines as one frame with
+  `backlog: true`, then streams while the stream is open. The stream expires 90 s after the last
+  `logs.start`; the platform renews every 30 s. `logs.stop` closes it early.
+- Redacted on Ready Up before sending: `rcon_password`, `sv_password`, the
+  `sv_setsteamaccount` token, `readyup_license_key`, fleet tokens (`rus_`, `rfk_`, `rhs_`, `rst_`,
+  `RUE-`) and `Bearer` values.
+- Limits: ring of 200 lines; a line is at most 512 bytes (cut, then `…`); flushed every 0.25 s in
+  frames of at most 100 lines; at most 100 lines/s, the excess is counted in `dropped`. The
+  platform keeps 200 lines per server and the console keeps 1000.
+
 ## 8. Server → platform messages
 
 ### 8.1 Events
