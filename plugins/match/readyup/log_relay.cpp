@@ -39,7 +39,7 @@ std::string RedactCvars(std::string_view s) {
         if (v < s.size() && s[v] == '"') ++v;
         const size_t sep = v;
         while (v < s.size() && IsSpace(s[v])) ++v;
-        if (v < s.size() && s[v] == '=') {
+        if (v < s.size() && (s[v] == '=' || s[v] == ':')) {
           ++v;
           while (v < s.size() && IsSpace(s[v])) ++v;
         }
@@ -86,6 +86,17 @@ std::string RedactTokens(std::string_view s) {
   return out;
 }
 
+std::string RedactValues(std::string s, const std::vector<std::string>& secrets) {
+  for (const auto& secret : secrets) {
+    size_t at = 0;
+    while ((at = s.find(secret, at)) != std::string::npos) {
+      s.replace(at, secret.size(), "***");
+      at += 3;
+    }
+  }
+  return s;
+}
+
 std::string Truncate(std::string s) {
   if (s.size() <= kLogLineMaxBytes) return s;
   static const char kEllipsis[] = "\xE2\x80\xA6";
@@ -100,8 +111,15 @@ std::string Truncate(std::string s) {
 
 std::string RedactLogLine(std::string_view line) { return RedactTokens(RedactCvars(line)); }
 
+void LogRelay::SetSecrets(std::vector<std::string> values) {
+  secrets_.clear();
+  for (auto& v : values)
+    if (v.size() >= 4) secrets_.push_back(std::move(v));
+  std::sort(secrets_.begin(), secrets_.end(), [](const std::string& a, const std::string& b) { return a.size() > b.size(); });
+}
+
 void LogRelay::Push(std::string_view line, double now) {
-  std::string s = Truncate(RedactLogLine(line));
+  std::string s = Truncate(RedactValues(RedactLogLine(line), secrets_));
   ring_.push_back(s);
   if (ring_.size() > kLogRingLines) ring_.pop_front();
   if (!Active(now) || backlogPending_) return;

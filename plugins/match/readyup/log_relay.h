@@ -21,6 +21,7 @@ constexpr size_t kLogLinesPerSecond = 100;
 constexpr double kLogFlushS = 0.25;
 constexpr double kLogStreamTtlS = 90.0;
 
+// SetSecrets() registers exact values (>= 4 chars) that are masked wherever they appear in a pushed line.
 // Values of rcon_password, sv_password, sv_setsteamaccount and readyup_license_key become ***;
 // rus_ rfk_ rhs_ rst_ RUE- and Bearer tokens keep their prefix.
 std::string RedactLogLine(std::string_view line);
@@ -33,6 +34,7 @@ class LogRelay {
     long long dropped = 0;
   };
 
+  void SetSecrets(std::vector<std::string> values);
   void Push(std::string_view line, double now);
   void Start(double now, bool backlog);
   void Stop();
@@ -40,6 +42,7 @@ class LogRelay {
   std::optional<Batch> Take(double now);
 
  private:
+  std::vector<std::string> secrets_;
   std::deque<std::string> ring_;
   std::deque<std::string> queue_;
   bool started_ = false;

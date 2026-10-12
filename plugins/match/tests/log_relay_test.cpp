@@ -36,6 +36,35 @@ static void RedactsSecrets() {
   CHECK(RedactLogLine("my_sv_password x") == "my_sv_password x");
 }
 
+static void RedactsColonForms() {
+  CHECK(RedactLogLine("rcon_password   : hunter2 : sv : desc") == "rcon_password   : *** : sv : desc");
+  CHECK(RedactLogLine("rcon_password:x") == "rcon_password:***");
+  CHECK(RedactLogLine("\"rcon_password\" : \"x\"") == "\"rcon_password\" : ***");
+  CHECK(RedactLogLine("sv_password : abc") == "sv_password : ***");
+  CHECK(RedactLogLine("sv_setsteamaccount:TOK123") == "sv_setsteamaccount:***");
+  CHECK(RedactLogLine("readyup_license_key : RUE-AB") == "readyup_license_key : ***");
+}
+
+static void RedactsSecretValues() {
+  LogRelay r;
+  r.SetSecrets({"hunter2", "ab", "", "TOKEN-9"});
+  r.Start(0, false);
+  r.Push("Logging into Steam with logon token 'TOKEN-9' and hunter2 hunter2", 0);
+  r.Push("ab stays", 0);
+  r.Start(0, true);
+  auto b = r.Take(0);
+  CHECK(b && b->lines.size() == 2);
+  if (b && b->lines.size() == 2) {
+    CHECK(b->lines[0] == "Logging into Steam with logon token '***' and *** ***");
+    CHECK(b->lines[1] == "ab stays");
+  }
+  r.SetSecrets({});
+  r.Push("hunter2", 1);
+  r.Start(1, true);
+  b = r.Take(1);
+  CHECK(b && b->lines.back() == "hunter2");
+}
+
 static void TruncatesLongLines() {
   LogRelay r;
   r.Start(0, true);
@@ -141,6 +170,8 @@ static void BacklogDoesNotRepeat() {
 
 int main() {
   RedactsSecrets();
+  RedactsColonForms();
+  RedactsSecretValues();
   TruncatesLongLines();
   RingKeeps200();
   StreamsAfterStart();

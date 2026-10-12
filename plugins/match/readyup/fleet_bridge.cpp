@@ -43,10 +43,12 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdio>
+#include <cstdint>
 #include <cstring>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <mutex>
 #include <set>
 #include <sstream>
@@ -1843,7 +1845,59 @@ void OnAdminsSet(const ru_fleet_msg* m) {
   }
 }
 
-void OnLogsStart(const ru_fleet_msg* m) { g_logRelay.Start(g_now, Bool(ParsePayload(m), "backlog")); }
+// Values masked in the live log: the passwords and license key read from the engine (cvar_query is
+// asynchronous), and the Steam game server token from the command line.
+constexpr double kLogSecretsRefreshS = 60.0;
+std::vector<std::string> g_cvarSecrets{"", "", ""};
+std::string g_cmdlineToken;
+bool g_cmdlineRead = false;
+double g_logSecretsAt = -1e9;
+
+void ApplyLogSecrets() {
+  std::vector<std::string> all = g_cvarSecrets;
+  all.push_back(g_cmdlineToken);
+  g_logRelay.SetSecrets(std::move(all));
+}
+
+void OnSecretCvar(void* user, const char*, const char* value) {
+  g_cvarSecrets[reinterpret_cast<uintptr_t>(user)] = value ? value : "";
+  ApplyLogSecrets();
+}
+
+std::string SteamTokenFromCmdline() {
+  std::ifstream f("/proc/self/cmdline", std::ios::binary);
+  std::string cmd((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+  std::vector<std::string> args;
+  size_t b = 0;
+  for (size_t i = 0; i <= cmd.size(); ++i) {
+    if (i == cmd.size() || cmd[i] == '\0') {
+      if (i > b) args.push_back(cmd.substr(b, i - b));
+      b = i + 1;
+    }
+  }
+  for (size_t i = 0; i + 1 < args.size(); ++i)
+    if (args[i] == "+sv_setsteamaccount" && args[i + 1][0] != '+' && args[i + 1][0] != '-') return args[i + 1];
+  return "";
+}
+
+void RefreshLogSecrets(double now) {
+  if (now - g_logSecretsAt < kLogSecretsRefreshS) return;
+  g_logSecretsAt = now;
+  if (!g_cmdlineRead) {
+    g_cmdlineRead = true;
+    g_cmdlineToken = SteamTokenFromCmdline();
+  }
+  if (!g_api || !RU_API_HAS(g_api, cvar_query) || !g_api->cvar_query) return;
+  static const char* const kNames[] = {"rcon_password", "sv_password", "readyup_license_key"};
+  for (uintptr_t i = 0; i < 3; ++i) g_api->cvar_query(g_api->self, kNames[i], OnSecretCvar, reinterpret_cast<void*>(i));
+  ApplyLogSecrets();
+}
+
+void OnLogsStart(const ru_fleet_msg* m) {
+  g_logSecretsAt = -1e9;
+  RefreshLogSecrets(g_now);
+  g_logRelay.Start(g_now, Bool(ParsePayload(m), "backlog"));
+}
 
 void SendLogBatches() {
   while (auto b = g_logRelay.Take(g_now)) {
@@ -2017,6 +2071,7 @@ void Tick(double now) {
   const ru_fleet_v1* f = Fleet();
   CheckCs2Update(now, FleetActive(f));
   SendLogBatches();
+  if (g_logRelay.Active(now)) RefreshLogSecrets(now);
   if (!g_asg.active) {
     (void)signals::Take();
     if (f && now - g_lastIdlePublish >= 1.0) {
