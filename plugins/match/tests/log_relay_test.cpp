@@ -168,6 +168,19 @@ static void BacklogDoesNotRepeat() {
   CHECK(!r.Take(2));
 }
 
+static void StripsTrailingNewlines() {
+  LogRelay r;
+  r.Start(0, false);
+  r.Push("hostname : x\r\n\n", 0);
+  r.Push("\n", 0);
+  r.Push("\r\n", 0);
+  auto b = r.Take(1);
+  CHECK(b && b->lines.size() == 1 && b->lines[0] == "hostname : x");
+  r.Start(1, true);
+  auto bl = r.Take(1);
+  CHECK(bl && bl->lines.size() == 1);
+}
+
 int main() {
   RedactsSecrets();
   RedactsColonForms();
@@ -178,6 +191,7 @@ int main() {
   RateCapCountsDropped();
   ExpiresWithoutRenew();
   BacklogDoesNotRepeat();
+  StripsTrailingNewlines();
   if (g_failures) {
     std::fprintf(stderr, "%d check(s) failed\n", g_failures);
     return 1;

@@ -119,6 +119,8 @@ void LogRelay::SetSecrets(std::vector<std::string> values) {
 }
 
 void LogRelay::Push(std::string_view line, double now) {
+  while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) line.remove_suffix(1);
+  if (line.empty()) return;
   std::string s = Truncate(RedactValues(RedactLogLine(line), secrets_));
   ring_.push_back(s);
   if (ring_.size() > kLogRingLines) ring_.pop_front();
