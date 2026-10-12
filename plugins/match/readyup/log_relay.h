@@ -35,6 +35,9 @@ class LogRelay {
   };
 
   void SetSecrets(std::vector<std::string> values);
+  // While now < until, Push drops the engine's answer lines (`name = value`, `"name" = "value"`, `name : value`)
+  // for these cvars, so Ready Up's own secret refresh queries stay out of the ring and the stream.
+  void MuteCvarEchoes(std::vector<std::string> names, double until);
   void Push(std::string_view line, double now);
   void Start(double now, bool backlog);
   void Stop();
@@ -43,6 +46,8 @@ class LogRelay {
 
  private:
   std::vector<std::string> secrets_;
+  std::vector<std::string> muted_;
+  double muteUntil_ = 0;
   std::deque<std::string> ring_;
   std::deque<std::string> queue_;
   bool started_ = false;

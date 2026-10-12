@@ -107,6 +107,21 @@ std::string Truncate(std::string s) {
   return s;
 }
 
+bool IsCvarEcho(std::string_view s, const std::vector<std::string>& names) {
+  size_t i = 0;
+  while (i < s.size() && IsSpace(s[i])) ++i;
+  if (i < s.size() && s[i] == '"') ++i;
+  for (const auto& name : names) {
+    if (!MatchesNoCase(s, i, name.c_str(), name.size())) continue;
+    size_t j = i + name.size();
+    if (j < s.size() && IsWord(s[j])) continue;
+    if (j < s.size() && s[j] == '"') ++j;
+    while (j < s.size() && IsSpace(s[j])) ++j;
+    if (j < s.size() && (s[j] == '=' || s[j] == ':')) return true;
+  }
+  return false;
+}
+
 }  // namespace
 
 std::string RedactLogLine(std::string_view line) { return RedactTokens(RedactCvars(line)); }
@@ -118,7 +133,17 @@ void LogRelay::SetSecrets(std::vector<std::string> values) {
   std::sort(secrets_.begin(), secrets_.end(), [](const std::string& a, const std::string& b) { return a.size() > b.size(); });
 }
 
+void LogRelay::MuteCvarEchoes(std::vector<std::string> names, double until) {
+  for (auto& n : names)
+    for (auto& c : n) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  muted_ = std::move(names);
+  muteUntil_ = until;
+}
+
 void LogRelay::Push(std::string_view line, double now) {
+  while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) line.remove_suffix(1);
+  if (line.empty()) return;
+  if (now < muteUntil_ && IsCvarEcho(line, muted_)) return;
   std::string s = Truncate(RedactValues(RedactLogLine(line), secrets_));
   ring_.push_back(s);
   if (ring_.size() > kLogRingLines) ring_.pop_front();
