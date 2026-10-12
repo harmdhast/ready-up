@@ -48,6 +48,7 @@ All branches merge cleanly into `upstream/master` as of 0db10b5. Conflicts are b
 | feat/cmd-reset | `cmd reset` ends any match context and frees the server | merged | `fleet_bridge.cpp` with resume-backup-chunks, backups-live-only | Both capabilities advertised; `g_liveSinceMs` kept in `Tick`, the exec reply loop stays where this branch moved it |
 | feat/cmd-add-time | `cmd add_time` extends the live round; players in `state.snapshot` | merged | `fleet_bridge.cpp` with resume-backup-chunks, backups-live-only; `fleet_state.*`, `fleet_protocol_test.cpp` with resume-backup-chunks | Clean on top of cmd-reset |
 | feat/fleet-live-logs | Live console relay: `logs.start` / `logs.stop` / `logs.lines` (capability `logs.v1`) | merged | `CMakeLists.txt`, `fleet_bridge.cpp` with fix/hud-blink, feat/cmd-add-time | Both test targets kept; `Tick` runs the exec replies and the players check, then `SendLogBatches` and the secret refresh |
+| feat/fleet-stop-rules | `match.assign` `rules.stop` sets `.stop` (`enabled`, `no_damage`); older servers ignore it | merged | none | |
 
 ## Not in custom
 
