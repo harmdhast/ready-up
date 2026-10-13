@@ -268,6 +268,11 @@ static void EnqueueAfterCfg(std::vector<std::string> cmds) {
   });
 }
 
+// The go-live window (mode still match warmup, mp_restartgame pending) drops CCSGameRules::TerminateRound:
+// a win condition that holds (a team with nobody on it) would credit a round on every tick and the
+// restart's halftime check would swap the sides. Win conditions are ignored until the live round starts.
+static void HoldWinConditionsForGoLive() { EnqueueAfterCfg({"mp_ignore_round_win_conditions 1"}); }
+
 static bool AnyHumanOnCtOrT() {
   for (const auto& h : ListHumans()) {
     if (h.team == 2 || h.team == 3) return true;
@@ -550,6 +555,7 @@ static bool ApplyKnifeSideChoiceLocked(State& st,
   if (EnqueueServerCommand("mp_warmup_pausetimer 0")) any = true;
   if (EnqueueServerCommand("mp_warmup_end")) any = true;
   round_restore::EnableRoundBackups(ctx.matchid, std::max(1, mapNumber));
+  HoldWinConditionsForGoLive();
   if (EnqueueServerCommand("mp_restartgame 1")) any = true;
   st.startTriggered = any;
   st.lastGateCmd = std::chrono::steady_clock::now();
@@ -939,6 +945,13 @@ static void ApplyMatchCvarsLocked(const WebhookMatchContext& ctx, bool followSid
   EnqueueAfterCfg(std::move(cmds));
 }
 
+// The live round's win-condition setting: a match config cvar wins over the default 0.
+static std::string WinConditionsAtLiveCommand(const WebhookMatchContext& ctx) {
+  const auto it = ctx.cvars.find("mp_ignore_round_win_conditions");
+  if (it != ctx.cvars.end() && IsSafeConvarValue(it->second)) return "mp_ignore_round_win_conditions " + it->second;
+  return "mp_ignore_round_win_conditions 0";
+}
+
 static void StopDemoLocked(State& st) {
   // Admin restart / end: stop now, no upload (map ends go through match_end.cpp).
   demo::StopNowWithoutUpload();
@@ -1001,7 +1014,6 @@ static void ApplyLiveRulesAndRestartLocked(State& st, const WebhookMatchContext&
         "mp_warmup_end",
         "mp_respawn_on_death_ct 0",
         "mp_respawn_on_death_t 0",
-        "mp_ignore_round_win_conditions 0",
         "mp_buy_anywhere 0",
         "mp_buytime 20",
         "sv_infinite_ammo 0",
@@ -1028,6 +1040,7 @@ static void ApplyLiveRulesAndRestartLocked(State& st, const WebhookMatchContext&
     }
   }
   round_restore::EnableRoundBackups(ctx.matchid, std::max(1, MatchStateGet().map_number));
+  HoldWinConditionsForGoLive();
   // Start clean (also effectively clears warmup scoreboard noise).
   if (EnqueueServerCommand("mp_restartgame 1")) any = true;
   if (any) {
@@ -1419,6 +1432,7 @@ bool ScrimGoLive(int restartSeconds) {
   if (EnqueueServerCommand("mp_warmup_pausetimer 0")) any = true;
   if (EnqueueServerCommand("mp_warmup_end")) any = true;
   round_restore::EnableRoundBackups(ctxOpt->matchid, std::max(1, MatchStateGet().map_number));
+  HoldWinConditionsForGoLive();
   const std::string restart = "mp_restartgame " + std::to_string(restartSeconds);
   if (EnqueueServerCommand(restart.c_str())) any = true;
   if (any) {
@@ -1523,6 +1537,7 @@ void OnMatchRoundStarted() {
   st.mode = ReadyUpMode::MatchLive;
   st.warmupRulesApplied = false;
   st.startTriggered = false;
+  if (const auto ctxWin = WebhookGetMatchContext()) (void)EnqueueServerCommand(WinConditionsAtLiveCommand(*ctxWin).c_str());
   readyup::persisted_match_state::PersistLiveFlag(true);
   match_recovery::NoteProgress();
   WebhookSetHeartbeatStatus("live");
