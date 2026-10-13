@@ -742,6 +742,14 @@ bool ParseResume(const Json& resume, const Json& config, long long epoch, Resume
     const std::string side = Str(*t1, "side");
     if (side == "ct" || side == "t") p.team1_side = side;
   }
+  std::string roundSides = Str(resume, "round_sides");
+  if (roundSides.empty() && backup) roundSides = Str(*backup, "round_sides");
+  if (!roundSides.empty()) {
+    if (roundSides != "team1_ct" && roundSides != "team2_ct") {
+      return fail("invalid_config", "round_sides must be team1_ct or team2_ct");
+    }
+    p.team1_side = roundSides == "team1_ct" ? "ct" : "t";
+  }
   if (const Json* ms = resume.Find("map_stats")) {
     if (!ms->IsObject()) return fail("invalid_config", "map_stats must be a MapStats object");
     p.map_stats = *ms;
