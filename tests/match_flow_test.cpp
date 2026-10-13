@@ -248,6 +248,15 @@ static void TestMapEndPlan() {
   CHECK_EQ(p.tvFlushDelay, 135);
 }
 
+static void TestKickDelayAfterSeriesEnd() {
+  CHECK_EQ(KickDelayAfterSeriesEnd(10, 0), 9.0);
+  CHECK_EQ(KickDelayAfterSeriesEnd(10, 5), 14.0);
+  CHECK_EQ(KickDelayAfterSeriesEnd(10, 30), kMatchEndKickMaxS);
+  CHECK_EQ(KickDelayAfterSeriesEnd(35, 30), kMatchEndKickMaxS);
+  CHECK_EQ(KickDelayAfterSeriesEnd(135, 0), kMatchEndKickMaxS);
+  CHECK_EQ(KickDelayAfterSeriesEnd(1, -5), 0.0);
+}
+
 static void TestSeriesOver() {
   // Bo1.
   CHECK(IsSeriesOver(1, RemainingMaps(1, 1, 1), 1, 0, true));
@@ -700,6 +709,7 @@ int main() {
   TestStatsSidesAndGate();
   TestStatsRestore();
   TestMapEndPlan();
+  TestKickDelayAfterSeriesEnd();
   TestSeriesOver();
   TestDemoNaming();
   TestMatchFlowEventJson();
