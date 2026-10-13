@@ -51,6 +51,7 @@ All branches merge cleanly into `upstream/master` as of 0db10b5. Conflicts are b
 | feat/fleet-stop-rules | `match.assign` `rules.stop` sets `.stop` (`enabled`, `no_damage`); older servers ignore it | merged | none | |
 | fix/resume-full-roster | A failover resume waits in warmup for the full roster to connect and ready (`min_players_to_ready` and autoready ignored); the crash recovery gate too | merged | `modes.h` (declarations of both kept), `ready_hud.cpp` (header status `FAILOVER` in custom's `status` field instead of the branch's title) | |
 | fix/backup-file-clock | Round backups are forwarded again: file times compare as Unix ms (libstdc++'s file clock is negative before 2174, so the scan read every match as not live) | merged | none (on top of fix/backups-live-only) | |
+| feat/resume-round-sides | Round backups carry their sides; a resume warmup is on the resumed round's sides and score; bot fill and restores follow them | merged | none | |
 
 ## Not in custom
 
