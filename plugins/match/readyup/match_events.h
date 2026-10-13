@@ -44,6 +44,15 @@ std::optional<int> GameEventsSlotForSteam(uint64_t steamid64);
 // lifecycle: a fresh game, so the round counter, halftime / overtime bookkeeping and the event
 // totals start over (match_log.cpp does the same for its log-derived counters). Game thread.
 void MatchEventsOnMatchStart();
+// Team1 on CT after `swapCount` side swaps of `mapNumber` (the map's start side, flipped per swap).
+bool Team1IsCtWithSwapCount(int mapNumber, int swapCount);
+// A failover resume of `mapNumber` is on `team1Ct` in the resumed round: the swap count of that map
+// follows (now, and after every reset of it for the map) until MatchEventsClearResumeSide.
+void MatchEventsSetResumeSide(int mapNumber, bool team1Ct);
+void MatchEventsClearResumeSide();
+// The swap count of `mapNumber` (0 while the counters belong to another map). Lock-free: safe
+// under modes.cpp's mutex.
+int MatchEventsSwapCountFor(int mapNumber);
 // Round restore (fleet_bridge.cpp): mp_backup_restore_load_file ends the current round as a draw
 // (reason 10) right away; round ends in the next `seconds` are not a played round (no stats, no
 // webhook, no map-end check). Game thread.

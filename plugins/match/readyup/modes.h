@@ -193,6 +193,9 @@ bool EndMatchResetServer();
 void ApplyMatchCvarsNow();
 // mp_teamname_1/2 + mp_teamflag_1/2 from the loaded match and the current map side (a rename, a swap).
 void ApplyTeamNamesNow();
+// Resume warmup: the CT / T names on the resumed round's sides (go-live sends the map-start names
+// again, the backup load swaps them itself).
+void ApplyResumeWarmupTeamNames();
 
 // Ready toggling for players.
 bool ToggleReady(uint64_t steamid64);

@@ -5,6 +5,7 @@
 
 #include "readyup/backup_files.h"
 #include "readyup/engine.h"
+#include "readyup/fleet_state.h"
 #include "readyup/esports.h"
 #include "readyup/host.h"
 #include "readyup/logging.h"
@@ -28,6 +29,7 @@
 #include <deque>
 #include <initializer_list>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -57,6 +59,15 @@ std::unordered_map<uint64_t, PlayerStats> g_stats;
 std::unordered_set<int> g_spawned;  // slots seen in player_spawn this map (stats participants)
 
 int g_swapCount = 0;           // side swaps applied so far on this map
+// Lock-free copies for modes.cpp, which holds its own mutex when it reads them (this module's
+// handlers take that one while holding g_mu).
+std::atomic<int> g_swapCountPub{0};
+std::atomic<int> g_lastMapNumberPub{0};
+struct ResumeSide {
+  int mapNumber = 0;
+  bool team1Ct = true;
+};
+std::optional<ResumeSide> g_resumeSide;  // the resumed round's side of team1, until the restore
 int g_lastHalfStartTotal = -1; // (team1+team2) total at which halftime + swap was emitted
 int g_lastOvertimeNumber = 0;  // last overtime_number overtime_started was emitted for
 
@@ -100,6 +111,12 @@ WebhookTeam TeamForSteam(uint64_t steamid64) {
   return it == ctx->roster_team.end() ? WebhookTeam::Unknown : it->second;
 }
 
+// After a swap count reset: the pending resume side of this map decides it.
+void ApplyResumeSideLocked(int mapNumber) {
+  if (!g_resumeSide || g_resumeSide->mapNumber != mapNumber) return;
+  g_swapCount = fleetstate::SwapParityFor(Team1IsCtWithSwapCount(mapNumber, 0), g_resumeSide->team1Ct);
+}
+
 void MaybeResetForMapLocked(int mapNumber) {
   if (mapNumber <= 0) mapNumber = 1;
   if (g_lastMapNumber != mapNumber) {
@@ -110,7 +127,10 @@ void MaybeResetForMapLocked(int mapNumber) {
     g_swapCount = 0;
     g_lastHalfStartTotal = -1;
     g_lastOvertimeNumber = 0;
+    ApplyResumeSideLocked(mapNumber);
   }
+  g_swapCountPub = g_swapCount;
+  g_lastMapNumberPub = g_lastMapNumber;
 }
 
 template <typename T>
@@ -210,6 +230,8 @@ const char* WinnerToTeamString(int csWinnerTeamNum) {
   return "team1";
 }
 
+}  // namespace
+
 bool InitialTeam1IsCtForMap(int mapNumber) {
   auto ctx = WebhookGetMatchContext();
   if (ctx && mapNumber >= 1 && static_cast<size_t>(mapNumber) <= ctx->map_sides.size()) {
@@ -220,9 +242,10 @@ bool InitialTeam1IsCtForMap(int mapNumber) {
 
 bool Team1IsCtWithSwapCount(int mapNumber, int swapCount) {
   bool team1IsCt = InitialTeam1IsCtForMap(mapNumber);
-  if ((swapCount % 2) != 0) team1IsCt = !team1IsCt;
-  return team1IsCt;
+  return fleetstate::Team1IsCtAfterSwaps(team1IsCt, swapCount);
 }
+
+namespace {
 
 // ---- match stats (match_stats.h) ---------------------------------------------------------------
 // Humans are keyed by SteamID64; bots get an id in the dev-bot range from their slot.
@@ -555,6 +578,7 @@ void OnRoundStartLocked(const PendingRound& ev) {
       if (sum == regHalf) EsportsOnHalftime();  // mp_halftime_pausematch (ruleset)
       WebhookEmitSideSwap(mapNumber, team1IsCtNow ? "CT" : "T", team1IsCtNow ? "T" : "CT");
       g_swapCount = swapCountForThisRound;
+      g_swapCountPub = g_swapCount;
     }
 
     // Event-provided ct/t scores, mapped with the current swap count.
@@ -722,6 +746,25 @@ void OnGameEvent(void* /*user*/, const char* name, const ru_game_event* ev) {
 
 }  // namespace
 
+void MatchEventsSetResumeSide(int mapNumber, bool team1Ct) {
+  std::lock_guard<std::recursive_mutex> lk(g_mu);
+  if (mapNumber <= 0) mapNumber = 1;
+  g_resumeSide = ResumeSide{mapNumber, team1Ct};
+  MaybeResetForMapLocked(mapNumber);
+  ApplyResumeSideLocked(mapNumber);
+  g_swapCountPub = g_swapCount;
+  StatsSyncSidesLocked();
+}
+
+void MatchEventsClearResumeSide() {
+  std::lock_guard<std::recursive_mutex> lk(g_mu);
+  g_resumeSide.reset();
+}
+
+int MatchEventsSwapCountFor(int mapNumber) {
+  return g_lastMapNumberPub.load() == (mapNumber <= 0 ? 1 : mapNumber) ? g_swapCountPub.load() : 0;
+}
+
 void MatchEventsOnMatchStart() {
   std::lock_guard<std::recursive_mutex> lk(g_mu);
   g_roundNumber = 0;
@@ -729,6 +772,9 @@ void MatchEventsOnMatchStart() {
   g_lastHalfStartTotal = -1;
   g_lastOvertimeNumber = 0;
   g_stats.clear();
+  ApplyResumeSideLocked(std::max(1, MatchStateGet().map_number));
+  g_swapCountPub = g_swapCount;
+  StatsSyncSidesLocked();
   MatchStateSetRound(0);
   MatchStateSetScore(0, 0);
 }
@@ -845,6 +891,8 @@ void MatchEventsRestore(const MatchEventsState& s) {
   g_roundNumber = s.roundNumber;
   g_lastMapNumber = s.lastMapNumber;
   g_swapCount = s.swapCount;
+  g_swapCountPub = g_swapCount;
+  g_lastMapNumberPub = g_lastMapNumber;
   g_lastHalfStartTotal = s.lastHalfStartTotal;
   g_lastOvertimeNumber = s.lastOvertimeNumber;
   g_stats.clear();
