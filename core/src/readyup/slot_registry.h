@@ -84,15 +84,21 @@ struct HumanIdentity {
   std::chrono::steady_clock::time_point teamAt{};
 };
 
-// Log-derived observation. team < 0 keeps the previous team.
+// Log-derived observation. team < 0 keeps the previous team. Ignored for a departed SteamID
+// (CS2 keeps logging lines for a player right after their `disconnected` line).
 void ObserveHuman(int userid, uint64_t steamid64, const std::string& name, int team);
 // Engine `player_team` event, already resolved to a SteamID. Returns false if
 // the SteamID is not a connected human.
 bool ObserveHumanTeamFromEvent(uint64_t steamid64, int slot, int team);
 // Engine slot seen for this SteamID in an engine event (player_spawn etc).
 void ObserveHumanSlot(uint64_t steamid64, int slot);
+// Removes the human and marks the SteamID departed until ObserveHumanArrival.
 void ForgetHuman(uint64_t steamid64);
-// Map load: players stay connected but have to pick a team again.
+// An arrival line (connected, entered the game, STEAM USERID validated, switch from
+// <Unassigned>): the SteamID is no longer departed.
+void ObserveHumanArrival(uint64_t steamid64);
+bool IsHumanDeparted(uint64_t steamid64);
+// Map load: players stay connected but have to pick a team again. Also forgets the departed set.
 void ResetHumanTeams();
 std::vector<HumanIdentity> ListHumans();
 

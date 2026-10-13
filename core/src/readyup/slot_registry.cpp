@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <mutex>
+#include <unordered_set>
 #include <unordered_map>
  #include <vector>
 
@@ -16,6 +17,8 @@ std::unordered_map<int, BotIdentity> g_bots;
 
 std::mutex g_humanMu;
 std::unordered_map<uint64_t, HumanIdentity> g_humans;
+std::unordered_set<uint64_t> g_departed;
+constexpr size_t kMaxDeparted = 256;
 
 }  // namespace
 
@@ -104,6 +107,7 @@ void ObserveHuman(int userid, uint64_t steamid64, const std::string& name, int t
   if (steamid64 == 0) return;
   const auto now = std::chrono::steady_clock::now();
   std::lock_guard<std::mutex> lk(g_humanMu);
+  if (g_departed.count(steamid64)) return;
   auto& h = g_humans[steamid64];
   h.steamid64 = steamid64;
   if (userid >= 0) h.userid = userid;
@@ -143,10 +147,24 @@ const char* TeamSourceName(TeamSource s) {
 void ForgetHuman(uint64_t steamid64) {
   std::lock_guard<std::mutex> lk(g_humanMu);
   g_humans.erase(steamid64);
+  if (steamid64 == 0) return;
+  if (g_departed.size() >= kMaxDeparted) g_departed.clear();
+  g_departed.insert(steamid64);
+}
+
+void ObserveHumanArrival(uint64_t steamid64) {
+  std::lock_guard<std::mutex> lk(g_humanMu);
+  g_departed.erase(steamid64);
+}
+
+bool IsHumanDeparted(uint64_t steamid64) {
+  std::lock_guard<std::mutex> lk(g_humanMu);
+  return g_departed.count(steamid64) != 0;
 }
 
 void ResetHumanTeams() {
   std::lock_guard<std::mutex> lk(g_humanMu);
+  g_departed.clear();
   const auto now = std::chrono::steady_clock::now();
   for (auto& kv : g_humans) {
     kv.second.team = 0;

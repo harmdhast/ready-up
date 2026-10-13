@@ -121,11 +121,22 @@ static void HandleLogLine(const char* lineCStr) {
 
   // Only treat as a player header if it looks like one.
   if (header.find('<') != std::string::npos && steamid64 != 0) {
-    ObserveSlotIdentity(slot, steamid64, name);
     int team = TeamFromHeader(header);
     const int switched = isChat ? -1 : TeamFromSwitchLine(line);
     if (switched >= 0) team = switched;
-    if (team >= 0) ObserveSlotTeamFromLog(slot, team);
+    const bool disconnect = !isChat && line.find("\" disconnected (reason") != std::string::npos;
+    if (!isChat && (line.find(" connected, address") != std::string::npos ||
+                    line.find("\" entered the game") != std::string::npos ||
+                    line.find("STEAM USERID validated") != std::string::npos ||
+                    line.find("switched from team <Unassigned>") != std::string::npos)) {
+      ObserveHumanArrival(steamid64);
+    }
+    // CS2 keeps logging lines for a player right after their disconnect line.
+    const bool departed = !disconnect && IsHumanDeparted(steamid64);
+    if (!departed) {
+      ObserveSlotIdentity(slot, steamid64, name);
+      if (team >= 0) ObserveSlotTeamFromLog(slot, team);
+    }
     // Plugin lifecycle events from log lines, only when engine events are not driving them.
     if (!isChat && !GameEventsListenerInstalled()) {
       plugins::LifecycleEvent e;
@@ -146,7 +157,7 @@ static void HandleLogLine(const char* lineCStr) {
     }
     // `"Name<2><[U:1:x]><CT>" disconnected (reason ...)`: the player leaves the registry
     // (plugins get RU_EVENT_PLAYER_DISCONNECT and drop their own state, e.g. ready).
-    if (!isChat && line.find("\" disconnected (reason") != std::string::npos) {
+    if (disconnect) {
       ForgetHuman(steamid64);
       ForgetSlotIdentitiesForSteam(steamid64);
       ObserveSlotTeamFromLog(slot, 0);

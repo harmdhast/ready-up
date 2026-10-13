@@ -405,6 +405,11 @@ target_include_directories(readyup_chat_rules_test PRIVATE ${CMAKE_SOURCE_DIR}/c
 target_compile_options(readyup_chat_rules_test PRIVATE -Wall -Wextra)
 add_test(NAME chat_rules COMMAND readyup_chat_rules_test)
 
+# Human presence registry (core/src/readyup/slot_registry.h).
+add_executable(readyup_slot_registry_test tests/slot_registry_test.cpp core/src/readyup/slot_registry.cpp)
+target_include_directories(readyup_slot_registry_test PRIVATE ${CMAKE_SOURCE_DIR}/core/src)
+target_compile_options(readyup_slot_registry_test PRIVATE -Wall -Wextra)
+
 # Plugin time per server frame, `ru perf` (core/src/readyup/perf_stats.h).
 add_executable(readyup_perf_stats_test tests/perf_stats_test.cpp core/src/readyup/perf_stats.cpp)
 target_include_directories(readyup_perf_stats_test PRIVATE ${CMAKE_SOURCE_DIR}/core/src)
@@ -461,6 +466,7 @@ add_test(NAME skins_reload COMMAND skins_reload_test)
 add_test(NAME plugin_state COMMAND readyup_plugin_state_test)
 add_test(NAME plugin_needs COMMAND readyup_plugin_needs_test)
 add_test(NAME ru_help COMMAND readyup_ru_help_test)
+add_test(NAME slot_registry COMMAND readyup_slot_registry_test)
 add_test(NAME license COMMAND readyup_license_test)
 add_test(NAME license_status COMMAND readyup_license_status_test)
 add_test(NAME load_order COMMAND readyup_load_order_test)
