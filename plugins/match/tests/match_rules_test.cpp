@@ -119,6 +119,13 @@ static void TestForceReady() {
   CHECK(ForceReadyAllowed(2, 2, 5));
   // Empty roster never qualifies.
   CHECK(!ForceReadyAllowed(0, 0, 0));
+  // After a failover the full roster is needed, whatever min_players_to_ready says.
+  CHECK(ReadyMinPlayers(2, false) == 2);
+  CHECK(ReadyMinPlayers(2, true) == 0);
+  CHECK(TeamReadyToGoLive(5, 3, 3, ReadyMinPlayers(2, false)));
+  CHECK(!TeamReadyToGoLive(5, 3, 3, ReadyMinPlayers(2, true)));
+  CHECK(TeamReadyToGoLive(5, 5, 5, ReadyMinPlayers(2, true)));
+  CHECK(!ForceReadyAllowed(3, 5, ReadyMinPlayers(2, true)));
 }
 
 static void TestTeamNames() {

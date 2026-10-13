@@ -361,10 +361,10 @@ void MatchFeaturesForceReady(uint64_t steamid64, const std::string& name) {
       if (connected.count(kv.first)) ++present;
     }
     teamName = TeamName(*ctx, team);
-    if (!ForceReadyAllowed(present, rosterSize, rules.min_players_to_ready, ctx->players_per_team)) {
+    const int minPlayers = ReadyMinPlayers(rules.min_players_to_ready, FullRosterGateEnabled());
+    if (!ForceReadyAllowed(present, rosterSize, minPlayers, ctx->players_per_team)) {
       return Reply(steamid64, "Ready Up: " + teamName + " needs " +
-                                  std::to_string(ForceReadyRequired(rosterSize, rules.min_players_to_ready,
-                                                                    ctx->players_per_team)) +
+                                  std::to_string(ForceReadyRequired(rosterSize, minPlayers, ctx->players_per_team)) +
                                   " players connected to force ready (" + std::to_string(present) + " now).");
     }
     for (const auto& kv : ctx->roster_team) {

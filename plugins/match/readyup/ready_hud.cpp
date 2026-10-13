@@ -172,7 +172,9 @@ static Board BuildBoard(ReadyUpMode mode, const std::optional<WebhookMatchContex
     if (cd >= 0) b.countdown = std::string(settings::Bool("knife_enabled_default") ? "knife in " : "live in ") + std::to_string(cd);
   } else {
     b.scrim = (ctx->slug == "scrim");
-    b.title = RecoveryGateEnabled() ? "recovered match" : (b.scrim ? "scrim" : "match warmup");
+    b.title = RecoveryGateEnabled()     ? "recovered match"
+              : FullRosterGateEnabled() ? "failover: everyone ready"
+              : (b.scrim ? "scrim" : "match warmup");
     const auto ms = MatchStateGet();
     const int mapNum = ms.map_number <= 0 ? 1 : ms.map_number;
     bool team1Ct = true;

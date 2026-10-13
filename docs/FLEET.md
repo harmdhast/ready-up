@@ -158,7 +158,8 @@ version.**
   forwarded). The series score, the earlier maps' results (`series_score` / `maps`, else from
   `resume.state`) and the resumed map's knife-decided `sides` are restored; map N loads (no map
   change when the server is on it); phase `restoring` is warmup with password + whitelist until
-  the roster is ready (or `force_ready` / `start`). The go-live round is not reported; 1 s after it
+  the full roster is connected and ready, whatever `min_players_to_ready` says and with autoready
+  off (`SetFullRosterGate`; or an admin's `force_ready` / `start`). The go-live round is not reported; 1 s after it
   the bridge seeds the stats model (`resume.map_stats`, else the backup's score), runs the same
   restore as `restore_round` (`mp_backup_restore_load_file`, rounds >= `round` voided), pauses
   (`rules.pause.pause_after_restore`, default true; false = unpause after 3 s), sends

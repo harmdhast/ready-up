@@ -84,6 +84,10 @@ int FullTeamSize(int rosterSize, int playersPerTeam = 0);
 bool ForceReadyAllowed(int connected, int rosterSize, int minPlayers, int playersPerTeam = 0);
 int ForceReadyRequired(int rosterSize, int minPlayers, int playersPerTeam = 0);
 
+// The minPlayers the ready gate and .forceready use: the rule, or 0 (a full team) after a failover
+// or a crash recovery, so every roster player is back before the match goes live again.
+int ReadyMinPlayers(int minPlayersRule, bool fullRoster);
+
 // ---- go-live ready gate ----------------------------------------------------------------------
 
 // One team may go live when `ready` (its connected roster players who typed .ready) reaches
