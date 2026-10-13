@@ -1089,6 +1089,12 @@ int BackupRoundFromName(const std::string& fileName) {
   return n;
 }
 
+long long FileTimeUnixMs(std::filesystem::file_time_type t) {
+  using namespace std::chrono;
+  const auto sys = system_clock::now() + duration_cast<system_clock::duration>(t - std::filesystem::file_time_type::clock::now());
+  return duration_cast<milliseconds>(sys.time_since_epoch()).count();
+}
+
 bool LiveSessionBackup(const std::string& fileName, const std::string& prefix, long long mtimeMs,
                        long long liveSinceMs) {
   if (liveSinceMs < 0 || fileName.compare(0, prefix.size(), prefix) != 0) return false;

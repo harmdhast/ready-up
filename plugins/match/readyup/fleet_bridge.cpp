@@ -136,7 +136,7 @@ bool g_resumeSnapshotPending = false;  // state.snapshot (restored) after match_
 // file when the round is played again after a restore, and the new version is sent too.
 std::mutex g_backupMu;
 std::set<std::string> g_sentBackups;
-// When the match went live (file clock ms), -1 while it is not: the scan forwards only the files
+// When the match went live (Unix ms of the file clock), -1 while it is not: the scan forwards only the files
 // written since (fs::LiveSessionBackup).
 long long g_liveSinceMs = -1;
 
@@ -145,10 +145,6 @@ std::string BackupKey(const std::filesystem::path& p) {
   const auto size = std::filesystem::file_size(p, ec);
   const auto mtime = std::filesystem::last_write_time(p, ec).time_since_epoch().count();
   return p.filename().string() + "|" + std::to_string(ec ? 0 : size) + "|" + std::to_string(mtime);
-}
-
-long long FileClockMs(std::filesystem::file_time_type t) {
-  return std::chrono::duration_cast<std::chrono::milliseconds>(t.time_since_epoch()).count();
 }
 
 long long UnixMs() {
@@ -775,7 +771,7 @@ void ScanBackups(std::string prefix, int mapNumber, int team1, int team2, int fi
       const std::string fn = it.path().filename().string();
       std::error_code tec;
       const auto mtime = it.last_write_time(tec);
-      if (tec || !fs::LiveSessionBackup(fn, prefix, FileClockMs(mtime), liveSinceMs)) continue;
+      if (tec || !fs::LiveSessionBackup(fn, prefix, fs::FileTimeUnixMs(mtime), liveSinceMs)) continue;
       const int r = fs::BackupRoundFromName(fn);
       if (r < 0 || !fs::ForwardsBackup(r, firstRound)) continue;
       const std::string key = BackupKey(it.path());
@@ -2320,7 +2316,7 @@ void Tick(double now) {
   if (GetMode() != ReadyUpMode::MatchLive) {
     g_liveSinceMs = -1;
   } else if (g_liveSinceMs < 0) {
-    g_liveSinceMs = FileClockMs(std::filesystem::file_time_type::clock::now());
+    g_liveSinceMs = fs::FileTimeUnixMs(std::filesystem::file_time_type::clock::now());
   }
   if (g_backupScanAt >= 0 && now >= g_backupScanAt) {
     g_backupScanAt = -1;
