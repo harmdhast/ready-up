@@ -74,6 +74,12 @@ void ReapplyWarmupRules();
 bool WarmupMapReady();
 void ModesAwaitMapLoad();
 
+// Full-roster gate: a match resumed after a failover (FLEET.md §11.3). Until it goes live, every
+// roster player must be connected and ready: min_players_to_ready and autoready do not apply.
+// The recovery gate implies it. A match load, the next map, a reset and idle clear it.
+void SetFullRosterGate(bool enabled);
+bool FullRosterGateEnabled();
+
 // Called when a match config is loaded successfully (seeds roster + enters warmup).
 void OnMatchLoaded();
 

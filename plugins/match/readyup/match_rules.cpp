@@ -101,6 +101,8 @@ int ForceReadyRequired(int rosterSize, int minPlayers, int playersPerTeam) {
   return std::min(minPlayers, rosterSize);
 }
 
+int ReadyMinPlayers(int minPlayersRule, bool fullRoster) { return fullRoster ? 0 : minPlayersRule; }
+
 bool ForceReadyAllowed(int connected, int rosterSize, int minPlayers, int playersPerTeam) {
   if (rosterSize <= 0) return false;
   return connected >= ForceReadyRequired(rosterSize, minPlayers, playersPerTeam);

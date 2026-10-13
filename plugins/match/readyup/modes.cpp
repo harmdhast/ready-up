@@ -124,6 +124,7 @@ struct State {
 
   // Boot-time recovery gate (pause + wait for ready) for mid-match restart.
   bool recoveryGate = false;
+  bool fullRosterGate = false;  // SetFullRosterGate
 
   // Lifecycle webhook idempotency.
   int lifecycleMapNumber = 0;
@@ -720,10 +721,11 @@ static bool AllRosterReadyAndConnectedLocked(State& st, const WebhookMatchContex
   // Simulation: the roster players bots play as are there.
   SimulationAddConnected(&connected);
 
-  // Each team has min_players_to_ready ready (0 = a full team: players_per_team, else 5), and every
+  // Each team has min_players_to_ready ready (0 = a full team: players_per_team, else 5; always a
+  // full team after a failover or a crash recovery), and every
   // connected player a full team needs is ready; a connected substitute beyond it does not hold
   // the match up (match_rules.h TeamReadyToGoLive).
-  const int minPlayers = EffectiveRules().min_players_to_ready;
+  const int minPlayers = ReadyMinPlayers(EffectiveRules().min_players_to_ready, st.fullRosterGate || st.recoveryGate);
   int roster[2] = {0, 0}, present[2] = {0, 0}, ready[2] = {0, 0};
   for (const auto& kv : ctx.roster_team) {
     const uint64_t sid = kv.first;
@@ -1093,6 +1095,7 @@ static void MaybeGateMatchLocked(State& st) {
     WebhookSetHeartbeatStatus("live");
     st.mode = ReadyUpMode::MatchLive;
     st.recoveryGate = false;
+    st.fullRosterGate = false;
     st.lastUi.clear();
 
     const auto ms = MatchStateGet();
@@ -1492,6 +1495,7 @@ void OnMatchLoaded() {
   ResetKnifeStateForMapLocked(st, /*mapNumber=*/0);
   readyup::persisted_match_state::PersistLiveFlag(false);
   st.recoveryGate = false;
+  st.fullRosterGate = false;
   st.lastForceJoin.clear();
   st.matchLoadedChatSent = false;
   st.lastNotReadyChat = {};
@@ -1625,6 +1629,7 @@ bool RestartMatch() {
   ResetKnifeStateForMapLocked(st, /*mapNumber=*/0);
   readyup::persisted_match_state::PersistLiveFlag(false);
   st.recoveryGate = false;
+  st.fullRosterGate = false;
   WebhookSetHeartbeatStatus("warmup");
 
   // Best-effort reset scoreboard state.
@@ -1666,6 +1671,7 @@ bool EndMatchResetServer() {
   WebhookSetHeartbeatStatus("idle");
   readyup::persisted_match_state::ClearActiveMatch();
   st.recoveryGate = false;
+  st.fullRosterGate = false;
   return ok;
 }
 
@@ -1707,6 +1713,18 @@ bool RecoveryGateEnabled() {
   auto& st = St();
   std::lock_guard<std::mutex> lk(st.mu);
   return st.recoveryGate;
+}
+
+void SetFullRosterGate(bool enabled) {
+  auto& st = St();
+  std::lock_guard<std::mutex> lk(st.mu);
+  st.fullRosterGate = enabled;
+}
+
+bool FullRosterGateEnabled() {
+  auto& st = St();
+  std::lock_guard<std::mutex> lk(st.mu);
+  return st.fullRosterGate || st.recoveryGate;
 }
 
 void ApplyTeamNamesNow() {
@@ -1954,6 +1972,7 @@ static void ResetToIdleAfterSeriesLocked(State& st) {
   st.demoRecording = false;
   ResetKnifeStateForMapLocked(st, /*mapNumber=*/0);
   st.recoveryGate = false;
+  st.fullRosterGate = false;
   WebhookSetHeartbeatStatus("idle");
 }
 
@@ -1972,6 +1991,7 @@ void ModesBeginNextMapWarmup() {
   st.lifecycleMapNumber = 0;
   st.warmupEndedSent = false;
   st.goingLiveSent = false;
+  st.fullRosterGate = false;
   WebhookSetHeartbeatStatus("warmup");
 }
 
@@ -2554,6 +2574,7 @@ status::Json ModesSnapshotJson() {
   j["start_triggered"] = st.startTriggered;
   j["last_gate_cmd"] = Tp(st.lastGateCmd);
   j["recovery_gate"] = st.recoveryGate;
+  j["full_roster_gate"] = st.fullRosterGate;
   j["lifecycle_map_number"] = st.lifecycleMapNumber;
   j["warmup_ended_sent"] = st.warmupEndedSent;
   j["going_live_sent"] = st.goingLiveSent;
@@ -2631,6 +2652,7 @@ void ModesRestoreJson(const status::Json& j) {
   b(&j, "start_triggered", st.startTriggered);
   t(&j, "last_gate_cmd", st.lastGateCmd);
   b(&j, "recovery_gate", st.recoveryGate);
+  b(&j, "full_roster_gate", st.fullRosterGate);
   i(&j, "lifecycle_map_number", st.lifecycleMapNumber);
   b(&j, "warmup_ended_sent", st.warmupEndedSent);
   b(&j, "going_live_sent", st.goingLiveSent);

@@ -96,7 +96,7 @@ void AutoReadyTick() {
   const auto ctx = WebhookGetMatchContext();
   const ReadyUpMode mode = GetMode();
   const bool on = ctx && ctx->slug != "scrim" && AutoreadyOn(*ctx) && mode == ReadyUpMode::MatchWarmup &&
-                  !GoLiveTriggered() && !KnifeIsAwaitingPick() && !RecoveryGateEnabled();
+                  !GoLiveTriggered() && !KnifeIsAwaitingPick() && !FullRosterGateEnabled();
   const std::string key = ctx ? std::to_string(ctx->matchid) + ":" + std::to_string(MatchStateGet().map_number) + ":" +
                                     GetModeString()
                               : std::string();

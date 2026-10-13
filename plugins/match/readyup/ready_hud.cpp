@@ -51,7 +51,7 @@ struct Entry {
 };
 
 struct Board {
-  std::string status = "WARMUP";  // header status: WARMUP / SCRIM / RECOVERY, or the countdown
+  std::string status = "WARMUP";  // header status: WARMUP / SCRIM / RECOVERY / FAILOVER, or the countdown
   const char* statusColor = kGold;
   std::string label[2] = {"CT", "T"};  // team line labels: [0] CT, [1] T (escaped HTML)
   std::vector<Entry> entries;
@@ -150,7 +150,9 @@ static Board BuildBoard(ReadyUpMode mode, const std::optional<WebhookMatchContex
     }
   } else {
     b.scrim = (ctx->slug == "scrim");
-    b.status = RecoveryGateEnabled() ? "RECOVERY" : (b.scrim ? "SCRIM" : "WARMUP");
+    b.status = RecoveryGateEnabled()     ? "RECOVERY"
+               : FullRosterGateEnabled() ? "FAILOVER"
+               : (b.scrim ? "SCRIM" : "WARMUP");
     const auto ms = MatchStateGet();
     const int mapNum = ms.map_number <= 0 ? 1 : ms.map_number;
     bool team1Ct = true;

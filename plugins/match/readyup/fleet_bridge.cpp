@@ -1101,6 +1101,7 @@ void BeginLoad() {
   // Map 1, or the map a failover resumes (workshop maps load with host_workshop_map).
   const int first = g_resumeActive ? g_resume.map_number : 1;
   ApplyLoadedMatch(*ctx, matJson, first);
+  SetFullRosterGate(g_resumeActive);  // after the load, which clears it
   if (g_resumeActive) {
     // Series state from the platform: maps won and the results of the maps before this one.
     ModesSetSeriesWins(g_resume.series_team1, g_resume.series_team2);
