@@ -53,6 +53,7 @@ All branches merge cleanly into `upstream/master` as of 0db10b5. Conflicts are b
 | fix/backup-file-clock | Round backups are forwarded again: file times compare as Unix ms (libstdc++'s file clock is negative before 2174, so the scan read every match as not live) | merged | none (on top of fix/backups-live-only) | |
 | fix/match-end-kick | Everyone (admins and SteamID-less slots included) is kicked at most 20 s after a match ends, is unassigned or moves | merged | none | |
 | feat/resume-round-sides | Round backups carry their sides; a resume warmup is on the resumed round's sides and score; bot fill and restores follow them | merged | none | |
+| fix/golive-win-conditions | No round is credited between the go-live and its restart (a warmup side with nobody on it no longer scores per tick and flips the halves) | merged | none | |
 
 ## Not in custom
 
