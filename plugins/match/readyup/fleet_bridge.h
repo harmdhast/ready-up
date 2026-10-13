@@ -42,6 +42,9 @@ void OnLogLine(const char* line);
 
 // True while a platform assignment is active.
 bool Assigned();
+// A failover resume of a started round is waiting for its go-live in match warmup: the map score
+// at that round and whether team1 is CT in it (warmup_score.h shows it). Game thread.
+bool ResumeWarmupScore(int* team1, int* team2, bool* team1Ct);
 // The enrolled fleet server id (fleet.so status), "" without fleet / before enrollment. Game thread.
 std::string FleetServerId();
 // The fleet MatchState (what state.snapshot / hello carry) while assigned; false otherwise.

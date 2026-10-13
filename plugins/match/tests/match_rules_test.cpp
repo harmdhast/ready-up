@@ -325,6 +325,19 @@ int main() {
   CHECK(!WarmupScoreResetActive("scrim_warmup", false, true, true) && !WarmupScoreResetActive("match_live", false, false, true));
   CHECK(!WarmupScoreResetActive("match_knife", false, false, true) && !WarmupScoreResetActive("practice", false, false, true));
   CHECK(!WarmupScoreResetActive("idle", false, false, true) && !WarmupScoreResetActive(nullptr, false, false, true));
+  // Resume warmup: the reset logic stands down for a resumed round's score (the preset runs instead).
+  CHECK(!WarmupScoreResetActive("match_warmup", true, false, true, /*resumePreset=*/true));
+  CHECK(!WarmupScoreResetActive("match_warmup", false, false, true, true));
+  CHECK(WarmupScoreResetActive("match_warmup", false, false, true, false));
+  {
+    int ct = -1, t = -1;
+    WarmupPresetScores(13, 2, true, &ct, &t);
+    CHECK(ct == 13 && t == 2);
+    WarmupPresetScores(13, 2, false, &ct, &t);
+    CHECK(ct == 2 && t == 13);
+    WarmupPresetScores(0, 0, false, &ct, &t);
+    CHECK(ct == 0 && t == 0);
+  }
   TestWeaponCleanup();
   std::printf("match_rules: %d checks, %d failures\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;

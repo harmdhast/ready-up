@@ -785,6 +785,39 @@ static void TestResume() {
   CHECK_STR(p.sides, "team1_ct");
   CHECK(p.score_team1 == 3 && p.score_team2 == 3);
 
+  // team1's side at the round: resume.round_sides > backup.round_sides > the state.
+  CHECK(fs::ParseResume(r, cfg, 3, &p, &code, &err) && p.team1_side == "t");
+  r2 = r;
+  r2["backup"]["round_sides"] = "team1_ct";
+  CHECK(fs::ParseResume(r2, cfg, 3, &p, &code, &err) && p.team1_side == "ct");
+  r2["round_sides"] = "team2_ct";
+  CHECK(fs::ParseResume(r2, cfg, 3, &p, &code, &err) && p.team1_side == "t");
+  r2["backup"]["round_sides"] = "team2_ct";
+  r2["round_sides"] = "team1_ct";
+  CHECK(fs::ParseResume(r2, cfg, 3, &p, &code, &err) && p.team1_side == "ct");
+  r2 = r;
+  r2["round_sides"] = "knife";
+  CHECK(!fs::ParseResume(r2, cfg, 3, nullptr, &code, &err) && code == "invalid_config");
+  r2 = r;
+  r2["backup"]["round_sides"] = "ct";
+  CHECK(!fs::ParseResume(r2, cfg, 3, nullptr, &code, &err) && code == "invalid_config");
+  CHECK(fs::ParseResume(r, cfg, 3, &p, &code, &err));
+  CHECK_STR(fs::ResumeFromJson(fs::ResumeToJson(p)).team1_side, "t");
+
+  // swapCount parity: the swaps that put team1 on the round's side from the map's start side.
+  CHECK(fs::SwapParityFor(true, true) == 0 && fs::SwapParityFor(false, false) == 0);
+  CHECK(fs::SwapParityFor(true, false) == 1 && fs::SwapParityFor(false, true) == 1);
+  CHECK(fs::Team1IsCtAfterSwaps(true, 0) && !fs::Team1IsCtAfterSwaps(true, 1) && fs::Team1IsCtAfterSwaps(false, 3));
+  // Second-half resume of a map team1 started on T: team1 is CT, so the event's ct score is team1's.
+  {
+    const int swaps = fs::SwapParityFor(/*startTeam1Ct=*/false, /*roundTeam1Ct=*/true);
+    int t1 = 0, t2 = 0;
+    fs::MapCtTScores(fs::Team1IsCtAfterSwaps(false, swaps), /*ct=*/13, /*t=*/2, &t1, &t2);
+    CHECK(t1 == 13 && t2 == 2);
+    fs::MapCtTScores(fs::Team1IsCtAfterSwaps(false, 0), 13, 2, &t1, &t2);  // swap count left at 0
+    CHECK(t1 == 2 && t2 == 13);
+  }
+
   // Errors: codes the platform shows.
   auto rejects = [&](Json bad, long long epoch, const char* wantCode) {
     std::string c, e;

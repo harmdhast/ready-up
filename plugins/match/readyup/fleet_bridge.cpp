@@ -128,6 +128,7 @@ double g_backupScanAt = -1;
 fs::ResumePlan g_resume;
 bool g_resumeActive = false;           // from the assign until the backup was restored
 double g_resumeRestoreAt = -1;         // restore time (1 s after the go-live)
+bool g_resumeNamesApplied = false;     // the resume warmup's team names were sent
 bool g_resumeRestored = false;         // RunResumeRestore ran
 double g_resumeUnpauseAt = -1;         // rules.pause.pause_after_restore = false
 bool g_resumeSnapshotPending = false;  // state.snapshot (restored) after match_restored went out
@@ -758,7 +759,8 @@ std::string BackupPrefix(int mapNumber) { return BackupPrefixFor(AsgMatchId(), m
 std::vector<std::string> BackupDirs() { return backup_files::BackupDirs(); }
 
 // Worker thread: forwards this live session's backup files with `prefix` that were not sent yet.
-void ScanBackups(std::string prefix, int mapNumber, int team1, int team2, int firstRound, long long liveSinceMs) {
+void ScanBackups(std::string prefix, int mapNumber, int team1, int team2, bool team1Ct, int firstRound,
+                 long long liveSinceMs) {
   struct Found {
     std::string name, path, key;
     int round;
@@ -813,6 +815,8 @@ void ScanBackups(std::string prefix, int mapNumber, int team1, int team2, int fi
       sc["team1"] = f.round == found.back().round ? team1 : 0;
       sc["team2"] = f.round == found.back().round ? team2 : 0;
       b["score"] = std::move(sc);
+      // Like the score: only the newest file has the sides of its round start at hand.
+      if (f.round == found.back().round) b["round_sides"] = team1Ct ? "team1_ct" : "team2_ct";
       b["encoding"] = "base64";
       b["data"] = fs::Base64Encode(data.substr(i * kBackupPartRaw, kBackupPartRaw));
       if (parts > 1) {
@@ -836,17 +840,19 @@ void RunBackupScan() {
   const int mapNumber = ms.map_number <= 0 ? 1 : ms.map_number;
   const std::string prefix = BackupPrefix(mapNumber);
   int t1 = ms.team1_score, t2 = ms.team2_score;
+  bool team1Ct = Team1IsCtWithSwapCount(mapNumber, MatchEventsSnapshot().swapCount);
   {
     std::lock_guard<std::recursive_mutex> lk(stats::Mutex());
     if (stats::Current().Live()) {
       t1 = stats::Current().Team1Score();
       t2 = stats::Current().Team2Score();
+      team1Ct = stats::Current().Team1IsCt();
     }
   }
   const int first = mapNumber == g_firstBackupMap ? g_firstBackupRound : 1;
   const long long liveSinceMs = g_liveSinceMs;
-  workers::Spawn("fleet-backup", [prefix, mapNumber, t1, t2, first, liveSinceMs] {
-    ScanBackups(prefix, mapNumber, t1, t2, first, liveSinceMs);
+  workers::Spawn("fleet-backup", [prefix, mapNumber, t1, t2, team1Ct, first, liveSinceMs] {
+    ScanBackups(prefix, mapNumber, t1, t2, team1Ct, first, liveSinceMs);
   });
 }
 
@@ -961,12 +967,14 @@ Result PrepareResumeBackup(unsigned long long matchId, fs::ResumePlan* plan) {
 
 // The restore itself (cmd restore_round, a resume): loads `file` (mp_backup_restore_load_file,
 // autopaused), voids rounds >= `round` in the stats model, the round counters and the scores
-// (`scoreT1` / `scoreT2` >= 0: the backup's score wins over the stats), pauses and emits
+// (`scoreT1` / `scoreT2` >= 0: the backup's score wins over the stats; `team1Side` "ct" | "t": the
+// sides of that round, which also set the swap count), pauses and emits
 // rounds_voided + match_restored (`extra` members added to its data), then round_restore.h
 // AfterRestore (backup_loaded webhook, pause_after_restore). True when the match unpauses by
 // itself in 3 s.
 bool DoRestoreNow(int mapNumber, int round, const std::string& file, const std::string& sha, const std::string& by,
-                  const std::string& reason, const Json& extra, int scoreT1, int scoreT2);
+                  const std::string& reason, const Json& extra, int scoreT1, int scoreT2,
+                  const std::string& team1Side);
 
 // A restore asked for between round_end and the next round_start: CS2 loads the backup but never
 // starts the next round (the server stays in RoundOver until a map change; seen in the NTLAN trial
@@ -976,7 +984,7 @@ struct DeferredRestore {
   bool active = false;
   bool needRoundEnd = false;  // an admin restore asked mid-round: first the round ends
   int mapNumber = 0, round = 0, scoreT1 = -1, scoreT2 = -1;
-  std::string file, sha, by, reason;
+  std::string file, sha, by, reason, team1Side;
   Json extra;
 };
 DeferredRestore g_deferredRestore;
@@ -991,17 +999,19 @@ void RunDeferredRestore() {
   DeferredRestore d = std::move(g_deferredRestore);
   g_deferredRestore = DeferredRestore{};
   Print("fleet: next round started; running the restore of map %d round %d\n", d.mapNumber, d.round);
-  (void)DoRestoreNow(d.mapNumber, d.round, d.file, d.sha, d.by, d.reason, d.extra, d.scoreT1, d.scoreT2);
+  (void)DoRestoreNow(d.mapNumber, d.round, d.file, d.sha, d.by, d.reason, d.extra, d.scoreT1, d.scoreT2,
+                     d.team1Side);
 }
 
 bool DoRestore(int mapNumber, int round, const std::string& file, const std::string& sha, const std::string& by,
-               const std::string& reason, const Json& extra, int scoreT1 = -1, int scoreT2 = -1) {
+               const std::string& reason, const Json& extra, int scoreT1 = -1, int scoreT2 = -1,
+               const std::string& team1Side = {}) {
   // An admin restore during a live round (past freeze time) gives money back but not weapons,
   // armor or utility: CS2 applies the backup's per-player Items only when the restore lands at a
   // round start (live test; a failover resume, restored 1 s into a fresh round, got them all).
   // So it waits for this round to end and runs at the next round start, like a resume.
   if (reason != "resume" && !MatchFeaturesRoundOver() && !MatchFeaturesInFreeze()) {
-    g_deferredRestore = DeferredRestore{true, true, mapNumber, round, scoreT1, scoreT2, file, sha, by, reason, extra};
+    g_deferredRestore = DeferredRestore{true, true, mapNumber, round, scoreT1, scoreT2, file, sha, by, reason, team1Side, extra};
     Print("fleet: restore of map %d round %d waits for this round to end (weapons come back at a round start)\n",
           mapNumber, round);
     SendToChat(("Ready Up: round " + std::to_string(round) +
@@ -1010,16 +1020,17 @@ bool DoRestore(int mapNumber, int round, const std::string& file, const std::str
     return false;
   }
   if (MatchFeaturesRoundOver()) {
-    g_deferredRestore = DeferredRestore{true, false, mapNumber, round, scoreT1, scoreT2, file, sha, by, reason, extra};
+    g_deferredRestore = DeferredRestore{true, false, mapNumber, round, scoreT1, scoreT2, file, sha, by, reason, team1Side, extra};
     Print("fleet: restore of map %d round %d waits for the next round start (round over)\n", mapNumber, round);
     SendToChat(("Ready Up: round " + std::to_string(round) + " is restored when the next round starts.").c_str());
     return false;
   }
-  return DoRestoreNow(mapNumber, round, file, sha, by, reason, extra, scoreT1, scoreT2);
+  return DoRestoreNow(mapNumber, round, file, sha, by, reason, extra, scoreT1, scoreT2, team1Side);
 }
 
 bool DoRestoreNow(int mapNumber, int round, const std::string& file, const std::string& sha, const std::string& by,
-                  const std::string& reason, const Json& extra, int scoreT1, int scoreT2) {
+                  const std::string& reason, const Json& extra, int scoreT1, int scoreT2,
+                  const std::string& team1Side) {
   g_restoring = true;
   MatchEventsIgnoreRoundEndsFor(5.0);  // the reload ends the current round as a draw
   (void)EnqueueServerCommand(("mp_backup_restore_load_file " + file).c_str());
@@ -1049,7 +1060,18 @@ bool DoRestoreNow(int mapNumber, int round, const std::string& file, const std::
   MatchStateSetScore(t1, t2);
   MatchEventsState es = MatchEventsSnapshot();
   es.roundNumber = round - 1;
+  if (team1Side == "ct" || team1Side == "t") {
+    // The sides of that round decide the swap count (not the half the counters were left in); a
+    // half start at this score was already swapped.
+    es.swapCount = fs::SwapParityFor(Team1IsCtWithSwapCount(mapNumber, 0), team1Side == "ct");
+    es.lastHalfStartTotal = t1 + t2;
+  }
   MatchEventsRestore(es);
+  MatchEventsClearResumeSide();
+  if (team1Side == "ct" || team1Side == "t") {
+    std::lock_guard<std::recursive_mutex> lk(stats::Mutex());
+    stats::Current().SetTeam1IsCt(team1Side == "ct");
+  }
   MatchLogState ls = MatchLogSnapshot();
   ls.roundNumber = round - 1;
   ls.team1Score = t1;
@@ -1098,6 +1120,10 @@ void BeginLoad() {
   const int first = g_resumeActive ? g_resume.map_number : 1;
   ApplyLoadedMatch(*ctx, matJson, first);
   SetFullRosterGate(g_resumeActive);  // after the load, which clears it
+  if (g_resumeActive && g_resume.round >= 1 && !g_resume.team1_side.empty()) {
+    // The warmup, bot fill and the restore follow the resumed round's sides.
+    MatchEventsSetResumeSide(g_resume.map_number, g_resume.team1_side == "ct");
+  }
   if (g_resumeActive) {
     // Series state from the platform: maps won and the results of the maps before this one.
     ModesSetSeriesWins(g_resume.series_team1, g_resume.series_team2);
@@ -1143,7 +1169,8 @@ void ClearAssignment() {
   g_pauseSeen = false;
   g_execs.clear();
   g_resume = fs::ResumePlan{};
-  g_resumeActive = g_resumeSnapshotPending = g_resumeRestored = false;
+  MatchEventsClearResumeSide();
+  g_resumeActive = g_resumeSnapshotPending = g_resumeRestored = g_resumeNamesApplied = false;
   g_resumeRestoreAt = g_resumeUnpauseAt = -1;
   g_deferredRestore = DeferredRestore{};  // a restore queued for the next round must not reach the next match
   g_backupScanAt = -1;
@@ -1483,7 +1510,7 @@ Result CmdRestore(const Json& args, const std::string& by) {
   if (mapNumber != ms.map_number) return Rejected("bad_phase", "the backup is for map " + std::to_string(mapNumber) +
                                                                   ", the server is on map " + std::to_string(ms.map_number));
   if (round < 1) return Rejected("bad_args", "round must be >= 1");
-  std::string file, sha;
+  std::string file, sha, team1Side;
   if (const Json* b = args.Find("backup"); b && b->IsObject()) {
     if (Int(*b, "parts", 1) > 1) return Rejected("unsupported", "multi-part inline backups are not accepted yet");
     file = Str(*b, "file");
@@ -1492,6 +1519,11 @@ Result CmdRestore(const Json& args, const std::string& by) {
     if (Str(*b, "encoding", "base64") != "base64" || !fs::Base64Decode(Str(*b, "data"), &raw)) {
       return Rejected("bad_args", "backup.data is not base64");
     }
+    const std::string sides = Str(*b, "round_sides");
+    if (!sides.empty() && sides != "team1_ct" && sides != "team2_ct") {
+      return Rejected("bad_args", "backup.round_sides must be team1_ct or team2_ct");
+    }
+    if (!sides.empty()) team1Side = sides == "team1_ct" ? "ct" : "t";
     sha = fs::Sha256Hex(raw);
     if (sha != Str(*b, "sha256")) return Rejected("checksum", "backup sha256 mismatch");
     if (Int(*b, "size", static_cast<long long>(raw.size())) != static_cast<long long>(raw.size())) {
@@ -1509,7 +1541,7 @@ Result CmdRestore(const Json& args, const std::string& by) {
     ss << in.rdbuf();
     sha = fs::Sha256Hex(ss.str());
   }
-  const bool autoUnpause = DoRestore(mapNumber, round, file, sha, by, "restore", Json::Object());
+  const bool autoUnpause = DoRestore(mapNumber, round, file, sha, by, "restore", Json::Object(), -1, -1, team1Side);
   g_phaseReason = "cmd:restore_round";
   SendToChat(("Ready Up: round " + std::to_string(round) + " restored by a tournament admin. " +
               (autoUnpause ? "Live in 3 seconds." : "Unpause when ready."))
@@ -1542,7 +1574,7 @@ void RunResumeRestore() {
   extra["resume"] = true;
   if (g_resume.from_epoch > 0) extra["from_epoch"] = g_resume.from_epoch;
   DoRestore(g_resume.map_number, g_resume.round, g_resume.file, g_resume.sha256, "platform:resume", "resume", extra,
-            g_resume.score_team1, g_resume.score_team2);
+            g_resume.score_team1, g_resume.score_team2, g_resume.team1_side);
   g_phaseReason = "resume";
   // Everyone readied up in warmup to get here, so the resume goes live by itself: `.r` is the
   // confirmation, no `.unpause` after it (live test). pause_after_restore still holds an admin
@@ -2323,6 +2355,14 @@ void Tick(double now) {
     RunBackupScan();
   }
   if (g_resumeActive && !g_loading && !g_handOverPending) {
+    if (!g_resumeNamesApplied && WarmupMapReady()) {
+      int a = 0, b = 0;
+      bool t1ct = true;
+      if (ResumeWarmupScore(&a, &b, &t1ct)) {
+        g_resumeNamesApplied = true;
+        ApplyResumeWarmupTeamNames();
+      }
+    }
     // The resumed map is map N whatever map tracking derived from the map list.
     const auto ms = MatchStateGet();
     if (ms.map_number != g_resume.map_number && CtxIsOurs(WebhookGetMatchContext())) {
@@ -2444,6 +2484,17 @@ bool RestoreRoundFromLocalBackup(int round, const std::string& by, const std::st
   return true;
 }
 
+bool ResumeWarmupScore(int* team1, int* team2, bool* team1Ct) {
+  if (!g_resumeActive || g_resumeRestored || g_resume.round < 1 || g_resume.score_team1 < 0 ||
+      g_resume.team1_side.empty() || GetMode() != ReadyUpMode::MatchWarmup) {
+    return false;
+  }
+  *team1 = g_resume.score_team1;
+  *team2 = g_resume.score_team2;
+  *team1Ct = g_resume.team1_side == "ct";
+  return true;
+}
+
 bool CurrentState(Json* out) {
   if (!g_asg.active || !g_stream.HasState()) return false;
   if (out) *out = g_stream.State();
@@ -2515,6 +2566,9 @@ void RestoreJson(const Json& j) {
   g_resumeRestored = Bool(j, "resume_restored");
   g_restoring = Bool(j, "restoring");
   if (const Json* r = j.Find("resume")) g_resume = fs::ResumeFromJson(*r);
+  if (g_resumeActive && !g_resumeRestored && g_resume.round >= 1 && !g_resume.team1_side.empty()) {
+    MatchEventsSetResumeSide(g_resume.map_number, g_resume.team1_side == "ct");
+  }
   g_fleetInstance = 0;  // this image registers its own handlers
   signals::SetEnabled(true);
   ScrimSetAutoEnabled(false);

@@ -161,6 +161,7 @@ bool ApplyUpdateOps(Json* config, const Json& ops, std::string* err, bool* passw
 //     maps?: {"<n>": {score, winner}},  // results of the maps before (else state.series.maps)
 //     sides?: team1_ct | team2_ct,      // starting sides of the resumed map (else state / config)
 //     score?: {team1, team2},           // map score at the start of `round` (else backup.score)
+//     round_sides?: team1_ct | team2_ct, // team1's side in `round` (else backup.round_sides, else state)
 //     map_stats?: MapStats,             // the platform's stats of the map (state.snapshot map_stats)
 //     state?: MatchState                // the platform's state at that round
 //   }
@@ -190,6 +191,17 @@ struct ResumePlan {
 // cannot be used with `config` (the match.assign config, already valid) and `epoch`.
 bool ParseResume(const Json& resume, const Json& config, long long epoch, ResumePlan* out, std::string* code,
                  std::string* err);
+// swapCount parity that puts team1 on the round's side on a map team1 started on `startTeam1Ct`.
+inline int SwapParityFor(bool startTeam1Ct, bool roundTeam1Ct) { return startTeam1Ct != roundTeam1Ct ? 1 : 0; }
+// Team1 on CT after `swapCount` side swaps of a map it started on `startTeam1Ct`.
+inline bool Team1IsCtAfterSwaps(bool startTeam1Ct, int swapCount) {
+  return (swapCount % 2) != 0 ? !startTeam1Ct : startTeam1Ct;
+}
+// A ct / t score pair as team1 / team2 scores.
+inline void MapCtTScores(bool team1Ct, int ct, int t, int* team1, int* team2) {
+  *team1 = team1Ct ? ct : t;
+  *team2 = team1Ct ? t : ct;
+}
 // Plugin reload: everything but `raw`.
 Json ResumeToJson(const ResumePlan& p);
 ResumePlan ResumeFromJson(const Json& j);

@@ -10,6 +10,9 @@
 // sends the warmup rules again and `mp_restartgame 1` (scrim warmup rules restart the game
 // themselves): scores and round count back to 0, everyone respawns, warmup money stays
 // (warmup_money.h). Log line: `warmup-score: ...`.
+// A failover resume warmup (fleet_bridge.h ResumeWarmupScore) shows the resumed round's score
+// instead: each tick the team entities' m_iScore are written to it (the backup load at go-live
+// restores the real one) and nothing is reset.
 
 #include <string>
 
@@ -19,11 +22,18 @@ namespace readyup {
 
 // Pure (ctest `match_rules`): reset the score in this ru mode string? Not before the warmup's map
 // has loaded (mapReady): a match load or the next map of a series switches to match warmup before
-// its map change, while the last map's score is still up.
-inline bool WarmupScoreResetActive(const char* ruMode, bool recoveryGate, bool goLivePending, bool mapReady) {
-  if (!ruMode || goLivePending || !mapReady) return false;
+// its map change, while the last map's score is still up. Not in a resume warmup (resumePreset).
+inline bool WarmupScoreResetActive(const char* ruMode, bool recoveryGate, bool goLivePending, bool mapReady,
+                                   bool resumePreset = false) {
+  if (!ruMode || goLivePending || !mapReady || resumePreset) return false;
   const std::string m = ruMode;
   return m == "scrim_warmup" || (m == "match_warmup" && !recoveryGate);
+}
+
+// Pure (ctest `match_rules`): the CT and T team scores for team1 / team2's resumed map score.
+inline void WarmupPresetScores(int team1, int team2, bool team1Ct, int* ct, int* t) {
+  *ct = team1Ct ? team1 : team2;
+  *t = team1Ct ? team2 : team1;
 }
 
 // readyup_plugin_load.

@@ -166,7 +166,9 @@ version.**
   `resume.state`) and the resumed map's knife-decided `sides` are restored; map N loads (no map
   change when the server is on it); phase `restoring` is warmup with password + whitelist until
   the full roster is connected and ready, whatever `min_players_to_ready` says and with autoready
-  off (`SetFullRosterGate`; or an admin's `force_ready` / `start`). The go-live round is not reported; 1 s after it
+  off (`SetFullRosterGate`; or an admin's `force_ready` / `start`). The warmup puts players, bot fill and
+  the team names on the resumed round's sides (`round_sides`: `resume.round_sides`, else
+  `backup.round_sides`, else `state.teams.team1.side`) with that round's score on the scoreboard. The go-live round is not reported; 1 s after it
   the bridge seeds the stats model (`resume.map_stats`, else the backup's score), runs the same
   restore as `restore_round` (`mp_backup_restore_load_file`, rounds >= `round` voided), pauses
   (`rules.pause.pause_after_restore`, default true; false = unpause after 3 s), sends
@@ -1256,11 +1258,14 @@ soon as the file is complete:
 
 ```ts
 InlineBackup { map_number: number, round: number, file: string, size: number, sha256: string,
-               score: { team1: number, team2: number }, encoding: "base64", data: string,
+               score: { team1: number, team2: number }, round_sides?: "team1_ct" | "team2_ct",
+               encoding: "base64", data: string,
                part?: number, parts?: number }     // files > 512 KB are split into parts
 ```
 
-`event.backup` is critical (spooled, replayed). The platform verifies sha256, stores the file,
+`event.backup` is critical (spooled, replayed). `score` and `round_sides` (team1's side) are those at the
+start of `round`; only the newest file of a scan has them. `cmd restore_round.backup.round_sides` sets the
+sides of the restore the same way. The platform verifies sha256, stores the file,
 and adds it to the list the admin chooses from (§11.2). The platform sends backups back the same
 way (`resume.backup`, `cmd restore_round.backup`).
 

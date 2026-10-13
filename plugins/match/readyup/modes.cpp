@@ -247,7 +247,7 @@ static std::string KnifeWinnerNameLocked(const State& st, const WebhookMatchCont
 // Forward declarations (defined later in this file).
 static void ApplyWarmupRulesLocked(State& st);
 static bool AllRosterReadyAndConnectedLocked(State& st, const WebhookMatchContext& ctx);
-static void ApplyMatchCvarsLocked(const WebhookMatchContext& ctx);
+static void ApplyMatchCvarsLocked(const WebhookMatchContext& ctx, bool followSides = false);
 static void FinishMapLocked(State& st, const WebhookMatchContext& ctx, int map_number, const std::string& map,
                             int team1_score, int team2_score, const char* winner, bool forfeit);
 
@@ -419,17 +419,9 @@ static void MaybeForceRosterTeamsLocked(State& st) {
   const auto ms = MatchStateGet();
   const int mapNum = ms.map_number <= 0 ? 1 : ms.map_number;
 
-  auto team1IsCtForMap = [&]() -> bool {
-    if (mapNum >= 1 && static_cast<size_t>(mapNum) <= ctx.map_sides.size()) {
-      const std::string& side = ctx.map_sides[static_cast<size_t>(mapNum - 1)];
-      if (side == "team1_ct") return true;
-      if (side == "team2_ct") return false;
-      // For "knife" (and unknown tokens), default to team1=CT for enforcement.
-    }
-    return true;
-  };
-
-  const bool team1IsCt = team1IsCtForMap();
+  // The map's start side (knife maps: team1 = CT until decided), flipped by the swap count: a
+  // resume warmup is on the resumed round's sides. The count is read lock-free (match_events.h).
+  const bool team1IsCt = Team1IsCtWithSwapCount(mapNum, MatchEventsSwapCountFor(mapNum));
   const auto now = std::chrono::steady_clock::now();
   const auto minInterval = std::chrono::milliseconds(900);
 
@@ -888,13 +880,15 @@ static bool IsSafeConvarValue(const std::string& s) {
 // mp_teamname_1 is the team that starts the map on CT (the engine keeps the names with the teams
 // at halftime); after a knife `.switch` (mp_swapteams) the map side, and so the names, change.
 // Scrims keep CS2's default names. Queued with the match cvars (after the cfg).
-static void AppendTeamNameCmds(std::vector<std::string>* cmds) {
+// followSides: a resume warmup, where the CT / T names follow the current sides (swap count).
+static void AppendTeamNameCmds(std::vector<std::string>* cmds, bool followSides = false) {
   const auto ctx = WebhookGetMatchContext();  // fresh: the knife pick just updated map_sides
   std::string n1, n2, f1, f2;
   if (ctx && ctx->slug != "scrim") {
     const int mapNum = std::max(1, MatchStateGet().map_number);
-    const bool team1Ct = !(static_cast<size_t>(mapNum) <= ctx->map_sides.size() &&
-                           ctx->map_sides[static_cast<size_t>(mapNum - 1)] == "team2_ct");
+    bool team1Ct = !(static_cast<size_t>(mapNum) <= ctx->map_sides.size() &&
+                     ctx->map_sides[static_cast<size_t>(mapNum - 1)] == "team2_ct");
+    if (followSides && MatchEventsSwapCountFor(mapNum) % 2 != 0) team1Ct = !team1Ct;
     n1 = SanitizeTeamName(team1Ct ? ctx->team1_name : ctx->team2_name);
     n2 = SanitizeTeamName(team1Ct ? ctx->team2_name : ctx->team1_name);
     f1 = SanitizeTeamName(team1Ct ? ctx->team1_flag : ctx->team2_flag);
@@ -909,12 +903,12 @@ static void AppendTeamNameCmds(std::vector<std::string>* cmds) {
   Debug("modes: team names ct-start=\"%s\" t-start=\"%s\"\n", n1.c_str(), n2.c_str());
 }
 
-static void ApplyMatchCvarsLocked(const WebhookMatchContext& ctx) {
+static void ApplyMatchCvarsLocked(const WebhookMatchContext& ctx, bool followSides) {
   // Normally read at match load already; this catches names added later (match.update) or a read
   // that could not go out then. The reads are queued now, the cvars below only after the cfg.
   cvar_snapshot::CaptureMatchCvars(ctx.cvars);
   std::vector<std::string> cmds;
-  AppendTeamNameCmds(&cmds);
+  AppendTeamNameCmds(&cmds, followSides);
   // Playout (match_settings.h): the engine must not end the map at the clinch either. A match
   // cvar mp_match_can_clinch wins (it follows below).
   if (!ctx.cvars.count("mp_match_can_clinch")) {
@@ -1733,12 +1727,18 @@ void ApplyTeamNamesNow() {
   for (const auto& c : cmds) (void)EnqueueServerCommand(c.c_str());
 }
 
+void ApplyResumeWarmupTeamNames() {
+  std::vector<std::string> cmds;
+  AppendTeamNameCmds(&cmds, /*followSides=*/true);
+  EnqueueAfterCfg(std::move(cmds));
+}
+
 void ApplyMatchCvarsNow() {
   auto ctxOpt = WebhookGetMatchContext();
   if (!ctxOpt) return;
   auto& st = St();
   std::lock_guard<std::mutex> lk(st.mu);
-  ApplyMatchCvarsLocked(*ctxOpt);
+  ApplyMatchCvarsLocked(*ctxOpt, st.mode == ReadyUpMode::MatchWarmup && st.fullRosterGate);
 }
 
 static std::optional<const char*> DetermineMapWinnerIfComplete(const WebhookMatchContext& ctx,
