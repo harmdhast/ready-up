@@ -930,6 +930,11 @@ int main(int argc, char** argv) {
   rp::Frame(true);
   Check(FramesUntil([] { return Sent("mp_restartgame 1"); }, 3000), "all ready: going live");
   Check(Has(Summary(), "\"ru_mode\":\"match_warmup\""), "match warmup until the live round starts");
+  Check(FramesUntil([] { return Sent("mp_ignore_round_win_conditions 1"); }, 1500),
+        "go-live: win conditions ignored again after the live rules");
+  Check(SentAt("mp_ignore_round_win_conditions 1") > SentAt("mp_buytime 20"),
+        "go-live: ignored after the live rules");
+  Check(!Sent("mp_ignore_round_win_conditions 0"), "go-live: win conditions stay ignored until the live round starts");
   ClearLog();
   ClearCmds();
   g_respawned.clear();
@@ -937,6 +942,11 @@ int main(int argc, char** argv) {
   Check(FramesUntil([] { return Logged("ready: moved bob to T"); }, 6000), "the team lock still moves bob");
   Check(!FramesUntil([&] { return respawned(3) || Sent("mp_restartgame 1"); }, 2500),
         "no respawn and no extra restart while going live");
+  ClearCmds();
+  rp::PostLogLine("L 01/01/2026 - 00:00:09: World triggered \"Round_Start\"\n");
+  Check(FramesUntil([] { return Sent("mp_ignore_round_win_conditions 0"); }, 1500),
+        "live round start: win conditions count again");
+  Check(Has(Summary(), "\"ru_mode\":\"match_live\""), "match live after the round start");
 
   std::puts("-- unload");
   ClearLog();

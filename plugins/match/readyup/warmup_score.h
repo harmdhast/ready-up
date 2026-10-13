@@ -9,7 +9,8 @@
 // recovery gate of a restored match, no go-live pending), a team score above 0 (CTeam m_iScore)
 // sends the warmup rules again and `mp_restartgame 1` (scrim warmup rules restart the game
 // themselves): scores and round count back to 0, everyone respawns, warmup money stays
-// (warmup_money.h). Log line: `warmup-score: ...`.
+// (warmup_money.h). The go-live window
+// (restart pending, mode still match warmup) keeps win conditions ignored until the live round starts. Log line: `warmup-score: ...`.
 // A failover resume warmup (fleet_bridge.h ResumeWarmupScore) shows the resumed round's score
 // instead: each tick the team entities' m_iScore are written to it (the backup load at go-live
 // restores the real one) and nothing is reset.
