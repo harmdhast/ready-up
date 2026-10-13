@@ -14,6 +14,7 @@
 #include "readyup/status_snapshot.h"
 
 #include <cstdint>
+#include <filesystem>
 #include <map>
 #include <string>
 #include <utility>
@@ -217,10 +218,13 @@ int BackupRoundFromName(const std::string& fileName);
 // ends in .txt, [A-Za-z0-9_.-] only).
 bool SafeBackupFileName(const std::string& name);
 // A round backup the scan forwards (fleet_bridge.cpp): "<prefix>...roundNN.txt" written since the
-// match went live (`liveSinceMs`, the file clock, -1 = not live). The go-live round's own file is
+// match went live (`liveSinceMs`, FileTimeUnixMs, -1 = not live). The go-live round's own file is
 // written in the frame the mode turns live, so kLiveBackupSlackMs before counts too. Older files
 // (a warmup, an earlier live session, before a server restart) stay local.
 constexpr long long kLiveBackupSlackMs = 2000;
+// A file time as Unix ms (the times LiveSessionBackup compares). libstdc++'s file clock counts from
+// 2174, so its raw count is negative today.
+long long FileTimeUnixMs(std::filesystem::file_time_type t);
 bool LiveSessionBackup(const std::string& fileName, const std::string& prefix, long long mtimeMs,
                        long long liveSinceMs);
 
