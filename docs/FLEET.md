@@ -737,8 +737,8 @@ match.unassign { match_id, epoch, reason: "ended" | "cancelled" | "superseded" |
                  kick_message?: string }
 ```
 
-Stops the match, clears `sv_password`, resets to idle, kicks players (after the `match_end.h`
-kick delay, or at once with `kick_message`) and becomes `available`. A pending demo upload continues.
+Stops the match, clears `sv_password`, resets to idle, kicks every player, admins and slots without a SteamID included (after the `match_end.h`
+kick delay capped at 20 s, or at once with `kick_message`) and becomes `available`. A pending demo upload continues.
 
 ### 7.3 `match.update` (roster and rule changes mid-match)
 
@@ -817,7 +817,7 @@ change wins until the next `server.config`. An absent field leaves its setting a
 | `hostname_format` | server setting `hostname_format` | match |
 | `scrim_knife` | server setting `knife_enabled_default` | match |
 | `scrim_when_idle` | server setting `scrim_when_idle` (`ru_scrim_when_idle`, default 1): off = an idle server stays idle when players join | match |
-| `series_end_kick_delay.{no_demo,demo_no_upload,demo_upload}` | `ru_series_end_kick_delay_*` | match |
+| `series_end_kick_delay.{no_demo,demo_no_upload,demo_upload}` | `ru_series_end_kick_delay_*` | match (kick at most 20 s after the series end) |
 | `demo.path` / `demo.name_format` | `ru_demo_path` / `ru_demo_name_format` | match |
 | `warmup.message_html` / `respawn` / `money` | `ru_warmup_message_html` / `ru_warmup_respawn` / `ru_warmup_startmoney` | match |
 | `offline_pause_minutes` | the offline timer (D12), over `[fleet] offline_pause_minutes` | fleet.so |
