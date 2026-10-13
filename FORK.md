@@ -54,6 +54,7 @@ All branches merge cleanly into `upstream/master` as of 0db10b5. Conflicts are b
 | fix/match-end-kick | Everyone (admins and SteamID-less slots included) is kicked at most 20 s after a match ends, is unassigned or moves | merged | none | |
 | feat/resume-round-sides | Round backups carry their sides; a resume warmup is on the resumed round's sides and score; bot fill and restores follow them | merged | none | |
 | fix/golive-win-conditions | No round is credited between the go-live and its restart (a warmup side with nobody on it no longer scores per tick and flips the halves) | merged | none | |
+| fix/ghost-after-disconnect | A disconnected player stays out of the player registry when CS2 logs more lines for them (no phantom player after a move or a kick) | merged | `CMakeLists.txt` (test blocks of both kept) | |
 
 ## Not in custom
 
