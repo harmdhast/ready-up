@@ -1,7 +1,7 @@
 {
  "schema": 1,
  "cs2": {
-  "buildid": "25947352",
+  "buildid": "25966348",
   "patch": "1.41.9.1"
  },
  "readyup": {
@@ -9,13 +9,13 @@
   "commit": "0db10b5f9896a24b13622cd732a72ec4e3854565"
  },
  "run": {
-  "id": "38675539804",
-  "url": "https://github.com/harmdhast/ready-up/actions/runs/38675539804",
+  "id": "38803205353",
+  "url": "https://github.com/harmdhast/ready-up/actions/runs/38803205353",
   "trigger": "build_change",
   "stage": "static",
   "state": "warn",
-  "started_at": "2026-10-15T03:18:08Z",
-  "finished_at": "2026-10-15T03:19:26Z"
+  "started_at": "2026-10-15T20:35:44Z",
+  "finished_at": "2026-10-15T20:36:59Z"
  },
  "overall": "warn",
  "components": [
@@ -559,5 +559,5 @@
    ]
   }
  ],
- "checked_at": "2026-10-15T03:19:26Z"
+ "checked_at": "2026-10-15T20:36:59Z"
 }
