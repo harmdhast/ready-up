@@ -318,11 +318,11 @@ bool UpdateBlocked() {
   return st.update_blocked != 0;
 }
 
-// Humans connected right now; `keep` spares real SteamIDs only, a slot without one is always kicked.
+// Humans connected right now.
 void KickHumans(const std::string& message, bool (*keep)(uint64_t)) {
   for (const auto& h : ListHumans()) {
-    if (h.userid < 0) continue;
-    if (keep && h.steamid64 != 0 && keep(h.steamid64)) continue;
+    if (h.userid < 0 || h.steamid64 == 0) continue;
+    if (keep && keep(h.steamid64)) continue;
     std::string m = message;
     for (char& c : m) {
       if (c == '"' || c == ';' || c == '\n' || c == '\r') c = ' ';

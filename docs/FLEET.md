@@ -743,7 +743,7 @@ match.unassign { match_id, epoch, reason: "ended" | "cancelled" | "superseded" |
                  kick_message?: string }
 ```
 
-Stops the match, clears `sv_password`, resets to idle, kicks every player, admins and slots without a SteamID included (after the `match_end.h`
+Stops the match, clears `sv_password`, resets to idle, kicks every player, admins included (after the `match_end.h`
 kick delay, or at once with `kick_message`) and becomes `available`. A pending demo upload continues.
 
 ### 7.3 `match.update` (roster and rule changes mid-match)
