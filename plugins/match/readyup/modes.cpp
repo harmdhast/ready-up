@@ -526,7 +526,7 @@ static void MaybeForceRosterTeamsLocked(State& st) {
         // the warmup round each time.
         ModesOnHumanJoinedTeam(slot, steamid, join);
       } else if (s_refusalReported.insert(steamid).second) {
-        Print("ready: could not move %s to %s (still trying)\n", name.c_str(), side);
+        Print("ready: could not move %s to %s (will retry on the next team change)\n", name.c_str(), side);
       }
     });
   }
@@ -953,7 +953,7 @@ static void ApplyWarmupRulesLocked(State& st) {
     EnqueueAfterCfg({"mp_friendlyfire 0"});
     // The scoreboard shows the teams' names from warmup on, not only once live.
     std::vector<std::string> names;
-    AppendTeamNameCmds(&names);
+    AppendTeamNameCmds(&names, st.mode == ReadyUpMode::MatchWarmup && st.fullRosterGate);
     EnqueueAfterCfg(std::move(names));
     if (any) {
       st.warmupRulesApplied = true;
@@ -1002,6 +1002,14 @@ static void ApplyWarmupRulesLocked(State& st) {
   // Warmup runs for hours: nothing drops on death (weapon_cleanup.h).
   for (const char* c : kWarmupNoDropCmds) {
     if (EnqueueServerCommand(c)) any = true;
+  }
+  // The scoreboard shows the teams' names from warmup on, not only once live.
+  {
+    std::vector<std::string> names;
+    AppendTeamNameCmds(&names, st.mode == ReadyUpMode::MatchWarmup && st.fullRosterGate);
+    for (const auto& c : names) {
+      if (EnqueueServerCommand(c.c_str())) any = true;
+    }
   }
   if (any) {
     st.warmupRulesApplied = true;

@@ -64,13 +64,12 @@ void Emit(const MatchFlowEvent& e) {
   for (auto& fn : ls) fn(e);
 }
 
-// Every human slot, admins and slots without a SteamID included (never bots or GOTV).
 void KickAllHumans(const std::string& reason) {
   std::string r = reason;
   std::replace(r.begin(), r.end(), '"', '\'');
   int kicked = 0;
   for (const auto& h : ListHumans()) {
-    if (h.userid < 0) continue;
+    if (h.userid < 0 || h.steamid64 == 0) continue;
     const std::string cmd = "kickid " + std::to_string(h.userid) + " \"" + r + "\"";
     if (EnqueueServerCommand(cmd.c_str())) ++kicked;
   }

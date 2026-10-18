@@ -700,6 +700,7 @@ int main(int argc, char** argv) {
   // CS2 credits a round before it calls TerminateRound, which match warmup drops: a win condition
   // that holds (the round timer at 0:00 once the warmup cvars are gone) scores on every tick.
   Check(FramesUntil([] { return Sent("mp_roundtime 7"); }, 2000), "match warmup rules applied");
+  Check(Sent("mp_teamname_1 \"Alpha\""), "match warmup without cfg exec: the team names go out");
   Check(!Sent("sv_cheats 1") && !Sent("sv_infinite_ammo 2"), "warmup infinite ammo without sv_cheats");
   ClearCmds();
   g_teamsUp = true;
