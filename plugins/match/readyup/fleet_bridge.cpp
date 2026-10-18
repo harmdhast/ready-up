@@ -1493,7 +1493,7 @@ void OnUnassign(const ru_fleet_msg* m) {
   } else if (!ListHumans().empty()) {
     int noDemo = 5, d1 = 0, d2 = 0;
     GetSeriesEndKickDelays(&noDemo, &d1, &d2);
-    g_kicks.push_back(PendingKick{g_now + std::min<double>(std::max(1, noDemo), kMatchEndKickMaxS), "Match ended. Thanks for playing!"});
+    g_kicks.push_back(PendingKick{g_now + std::max(1, noDemo), "Match ended. Thanks for playing!"});
   }
   Reply(ref, epoch, Ok());
   Print("fleet: unassigned match %s epoch %lld (%s)\n", mid.c_str(), epoch, reason.c_str());

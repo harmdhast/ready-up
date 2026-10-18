@@ -41,7 +41,6 @@ struct Plan {
   double due = 0;  // host::NowSeconds()
   std::string next;        // NextMap
   std::string kickReason;  // KickThenReset
-  double resetAfterKick = kResetAfterKickSeconds;  // KickThenReset: seconds from the kick to the unload
   MatchFlowEvent base;     // Reset / KickThenReset: the ServerReset event
 };
 Plan g_plan;  // guarded by g_mu
@@ -103,7 +102,7 @@ std::vector<std::string> SplitArgs(const std::string& line) {
 
 void ScheduleNextMap(double delay, std::string next, unsigned gen) {
   g_pending.fetch_add(1);
-  SetPlan(Plan{Plan::NextMap, host::NowSeconds() + delay, next, {}, kResetAfterKickSeconds, {}});
+  SetPlan(Plan{Plan::NextMap, host::NowSeconds() + delay, next, {}, {}});
   ScheduleOnGameThread(delay, [next, gen]() {
     g_pending.fetch_sub(1);
     if (g_generation.load() != gen) return;
@@ -115,7 +114,7 @@ void ScheduleNextMap(double delay, std::string next, unsigned gen) {
 
 void ScheduleReset(double delay, MatchFlowEvent base, unsigned gen) {
   g_pending.fetch_add(1);
-  SetPlan(Plan{Plan::Reset, host::NowSeconds() + delay, {}, {}, kResetAfterKickSeconds, base});
+  SetPlan(Plan{Plan::Reset, host::NowSeconds() + delay, {}, {}, base});
   ScheduleOnGameThread(delay, [base, gen]() {
     g_pending.fetch_sub(1);
     if (g_generation.load() != gen) return;
@@ -127,16 +126,14 @@ void ScheduleReset(double delay, MatchFlowEvent base, unsigned gen) {
   });
 }
 
-// Kicks everyone after `delay`, then unloads the match `resetAfterKick` later.
-void ScheduleKickThenReset(double delay, double resetAfterKick, std::string kickReason, MatchFlowEvent base,
-                           unsigned gen) {
+void ScheduleKickThenReset(double delay, std::string kickReason, MatchFlowEvent base, unsigned gen) {
   g_pending.fetch_add(1);
-  SetPlan(Plan{Plan::KickThenReset, host::NowSeconds() + delay, {}, kickReason, resetAfterKick, base});
-  ScheduleOnGameThread(delay, [kickReason, resetAfterKick, base, gen]() {
+  SetPlan(Plan{Plan::KickThenReset, host::NowSeconds() + delay, {}, kickReason, base});
+  ScheduleOnGameThread(delay, [kickReason, base, gen]() {
     g_pending.fetch_sub(1);
     if (g_generation.load() != gen) return;
     KickAllHumans(kickReason);
-    ScheduleReset(resetAfterKick, base, gen);
+    ScheduleReset(kResetAfterKickSeconds, base, gen);
   });
 }
 
@@ -242,7 +239,6 @@ MapEndPlan MatchEndOnMapComplete(const MapEndInput& in) {
   if (!in.seriesWinner.empty()) seriesWinner = in.seriesWinner;
   const std::string winnerName = seriesWinner == "team1" ? base.team1Name : seriesWinner == "team2" ? base.team2Name : "";
   const int resetIn = base.scrim ? std::max(1, plan.restartDelay - 1) : plan.kickDelay;
-  const double kickIn = KickDelayAfterSeriesEnd(plan.restartDelay, plan.kickDelay - (plan.restartDelay - 1));
 
   MatchFlowEvent seriesEv = base;
   seriesEv.type = MatchFlowEventType::SeriesEnd;
@@ -279,12 +275,12 @@ MapEndPlan MatchEndOnMapComplete(const MapEndInput& in) {
     return plan;
   }
 
-  SendToChat(("Ready Up: all players will be disconnected in " + std::to_string(static_cast<int>(kickIn)) +
+  SendToChat(("Ready Up: all players will be disconnected in " + std::to_string(resetIn) +
               "s to prepare the server for the next match.")
                  .c_str());
   const std::string kickReason = winnerName.empty() ? std::string("Series over. Thanks for playing!")
                                                     : winnerName + " won the match";
-  ScheduleKickThenReset(kickIn, resetIn + kResetAfterKickSeconds - kickIn, kickReason, base, gen);
+  ScheduleKickThenReset(resetIn, kickReason, base, gen);
   return plan;
 }
 
@@ -307,7 +303,6 @@ status::Json MatchEndSnapshotJson() {
     p["due"] = g_plan.due;
     p["next"] = g_plan.next;
     p["kick_reason"] = g_plan.kickReason;
-    p["reset_after_kick"] = g_plan.resetAfterKick;
     status::Json e = status::Json::Object();
     e["matchid"] = static_cast<long long>(g_plan.base.matchid);
     e["slug"] = g_plan.base.slug;
@@ -357,10 +352,7 @@ void MatchEndRestoreJson(const status::Json& j) {
   Print("map-end: rescheduling the %s in %.1fs (plugin reloaded in postgame)\n", what, left);
   if (kind == Plan::NextMap) ScheduleNextMap(left, s(p, "next"), gen);
   else if (kind == Plan::Reset) ScheduleReset(left, base, gen);
-  else if (kind == Plan::KickThenReset) {
-    const auto* r = p->Find("reset_after_kick");
-    ScheduleKickThenReset(left, r ? r->AsDouble() : kResetAfterKickSeconds, s(p, "kick_reason"), base, gen);
-  }
+  else if (kind == Plan::KickThenReset) ScheduleKickThenReset(left, s(p, "kick_reason"), base, gen);
 }
 
 bool MatchEndPending() { return g_pending.load() > 0; }
