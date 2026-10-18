@@ -87,6 +87,8 @@ struct MatchFlowEvent {
   bool demoRecorded = false;
   bool demoUploadConfigured = false;
   stats::MapStats stats;       // MapResult
+  bool decidedByDamage = false;  // MapResult: tied after the overtimes, won on total damage
+  int team1Damage = 0, team2Damage = 0;
 };
 
 const char* MatchFlowEventTypeName(MatchFlowEventType t);
@@ -112,6 +114,9 @@ struct MapEndInput {
   std::string nextMap;       // when the series continues
   // Series over: the winner when it is not the series score's (a forfeit); empty = by score.
   std::string seriesWinner;
+  // A map tied after its overtimes and won on total damage (damage tiebreak): both teams' damage.
+  bool decidedByDamage = false;
+  int team1Damage = 0, team2Damage = 0;
 };
 
 // Game thread, called with the modes mutex held: sends the MapResult event and only

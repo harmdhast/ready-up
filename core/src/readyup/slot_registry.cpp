@@ -2,8 +2,8 @@
 
 #include <chrono>
 #include <mutex>
-#include <unordered_set>
 #include <unordered_map>
+#include <unordered_set>
  #include <vector>
 
 namespace readyup {
@@ -17,8 +17,7 @@ std::unordered_map<int, BotIdentity> g_bots;
 
 std::mutex g_humanMu;
 std::unordered_map<uint64_t, HumanIdentity> g_humans;
-std::unordered_set<uint64_t> g_departed;
-constexpr size_t kMaxDeparted = 256;
+std::unordered_set<uint64_t> g_departed;  // left; no connect line since (guarded by g_humanMu)
 
 }  // namespace
 
@@ -107,7 +106,16 @@ void ObserveHuman(int userid, uint64_t steamid64, const std::string& name, int t
   if (steamid64 == 0) return;
   const auto now = std::chrono::steady_clock::now();
   std::lock_guard<std::mutex> lk(g_humanMu);
-  if (g_departed.count(steamid64)) return;
+  // A userid belongs to one live client: whoever held it before is gone, even when their
+  // disconnect line never came (a client stuck "challenging"). The stale entry kept a userid with
+  // a steamid off the roster, the whitelist kicked that userid every 3 s, and the kick hit the
+  // rostered player who got the number next (NTLAN, 2026-10-16).
+  if (userid >= 0) {
+    for (auto it = g_humans.begin(); it != g_humans.end();) {
+      if (it->first != steamid64 && it->second.userid == userid) it = g_humans.erase(it);
+      else ++it;
+    }
+  }
   auto& h = g_humans[steamid64];
   h.steamid64 = steamid64;
   if (userid >= 0) h.userid = userid;
@@ -147,30 +155,49 @@ const char* TeamSourceName(TeamSource s) {
 void ForgetHuman(uint64_t steamid64) {
   std::lock_guard<std::mutex> lk(g_humanMu);
   g_humans.erase(steamid64);
-  if (steamid64 == 0) return;
-  if (g_departed.size() >= kMaxDeparted) g_departed.clear();
-  g_departed.insert(steamid64);
+  if (steamid64 != 0) g_departed.insert(steamid64);
 }
 
-void ObserveHumanArrival(uint64_t steamid64) {
+bool AcceptHumanLogLine(uint64_t steamid64, bool leaving, bool connectLine) {
+  if (leaving) return true;
   std::lock_guard<std::mutex> lk(g_humanMu);
-  g_departed.erase(steamid64);
-}
-
-bool IsHumanDeparted(uint64_t steamid64) {
-  std::lock_guard<std::mutex> lk(g_humanMu);
-  return g_departed.count(steamid64) != 0;
+  auto it = g_departed.find(steamid64);
+  if (it == g_departed.end()) return true;
+  if (!connectLine) return false;
+  g_departed.erase(it);
+  return true;
 }
 
 void ResetHumanTeams() {
   std::lock_guard<std::mutex> lk(g_humanMu);
-  g_departed.clear();
   const auto now = std::chrono::steady_clock::now();
   for (auto& kv : g_humans) {
     kv.second.team = 0;
     kv.second.teamSource = TeamSource::None;
     kv.second.teamAt = now;
   }
+}
+
+int ReconcileHumanTeams(int (*engineTeam)(int slot)) {
+  if (!engineTeam) return 0;
+  struct Seen {
+    uint64_t steamid64;
+    int slot, team;
+  };
+  std::vector<Seen> seen;
+  {
+    std::lock_guard<std::mutex> lk(g_humanMu);
+    for (const auto& kv : g_humans) {
+      if (kv.second.slot >= 0) seen.push_back({kv.first, kv.second.slot, kv.second.team});
+    }
+  }
+  int changed = 0;
+  for (const auto& s : seen) {  // the engine is read outside the lock
+    const int t = engineTeam(s.slot);
+    if (t < 0 || t > 3 || t == s.team) continue;
+    if (ObserveHumanTeamFromEvent(s.steamid64, s.slot, t)) ++changed;
+  }
+  return changed;
 }
 
 std::vector<HumanIdentity> ListHumans() {

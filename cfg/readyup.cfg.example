@@ -52,8 +52,11 @@ admin_prefix=<DarkRed>[Admin]<Default>
 # Match rules (readyup-match). Scrims use these; a match config's own values win for matches.
 # max_tech_pauses_per_team=3     technical pauses (.tech/.pause) per team per map, 0 = unlimited
 # tech_pause_max_seconds=300     auto-unpause after this long, 0 = never
+# disconnect_pause_max_seconds=300  a pause for a short side (sv_matchpause_auto_5v5) goes on by itself
+#                                when both sides are full again, or after this long; 0 = never
 # both_teams_unpause_required=1  0 = the pausing team alone can unpause
 # allow_force_ready=1            .forceready readies the caller's team
+# team_ready=0                   1: a rostered player's .ready / .unready is for their whole team (match warmup)
 # min_players_to_ready=0         players a team needs ready to go live / connected to force ready
 #                                (0 = a full team: players_per_team, else 5; substitutes on top).
 #                                The same value as minimum_ready_required below.

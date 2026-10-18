@@ -48,11 +48,14 @@ struct Payload {
   std::string product;   // servers | platform
   std::string pack;      // S | M | L
   int64_t max_servers = 0;
-  std::string kind;  // event | year | founder
+  std::string kind;  // month | year | founder (event: older keys)
   std::string issued_at;
   std::string updates_until;  // YYYY-MM-DD, inclusive
   std::string valid_from;     // YYYY-MM-DD, event licenses only
   std::string valid_to;
+  // Only on a lease: the license's current terms from a check-in (csm writes it as
+  // readyup_license_lease). Used for limits next to the key, never as the key.
+  bool lease = false;
 };
 
 struct Result {
@@ -83,6 +86,33 @@ bool Base64UrlDecode(const std::string& in, std::vector<uint8_t>* out);
 
 // Today's date in UTC, YYYY-MM-DD.
 std::string TodayUtc();
+
+// ---- paid license standing (pricing v4) ------------------------------------------------
+
+// Where a paid license stands, the same rule as the platform and csm (api/src/services/license/
+// gate.ts, csm license_enforce.go). Only a genuine key is ever enforced; no key (free use) or a
+// key that doesn't verify never stops anything.
+struct Standing {
+  bool paid = false;
+  // "free" | "invalid" | "active" | "past_due" | "expired"
+  std::string status = "free";
+  // Why past due / expired: "unpaid" | "replaced" | "in_use_elsewhere" (else empty).
+  std::string reason;
+  std::string stops_on;  // YYYY-MM-DD: the first day it no longer works, or empty
+  int64_t max_servers = 0;
+};
+
+constexpr int kGraceDays = 14;
+
+// key: the license key. lease: the license's current terms (a signed lease from the check-in, may
+// be empty). state / state_stops_on: what the license server last said ("active", "past_due",
+// "expired", "replaced", "in_use_elsewhere"; may be empty). today: YYYY-MM-DD (UTC).
+Standing StandingFor(const std::string& key, const std::string& lease, const std::string& state,
+                     const std::string& state_stops_on, const std::string& today,
+                     const std::vector<PublicKey>* keys = nullptr);
+
+// YYYY-MM-DD plus `days` (negative to go back). Empty for a bad date.
+std::string AddDays(const std::string& day, int days);
 
 // ---- presentation (console / chat text) -------------------------------------------------
 

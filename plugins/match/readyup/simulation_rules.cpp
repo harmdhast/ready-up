@@ -21,6 +21,26 @@ FillPlan PlanFill(int playersPerTeam, int humansCt, int humansT, const std::vect
   return p;
 }
 
+std::vector<uint64_t> HeldSeats(std::map<uint64_t, double>* missingSince, const std::vector<uint64_t>& here,
+                                double now, int holdSeconds) {
+  std::vector<uint64_t> held;
+  for (auto it = missingSince->begin(); it != missingSince->end();) {
+    if (std::find(here.begin(), here.end(), it->first) != here.end()) {
+      it->second = 0;
+      ++it;
+      continue;
+    }
+    if (it->second == 0) it->second = now;
+    if (holdSeconds <= 0 || now - it->second > holdSeconds) {
+      it = missingSince->erase(it);
+      continue;
+    }
+    held.push_back(it->first);
+    ++it;
+  }
+  return held;
+}
+
 std::vector<std::string> FillSetupCommands() {
   auto commands = SetupCommands();
   // bot_kick also kicks GOTV. Quota zero removes gameplay bots while keeping the demo alive.

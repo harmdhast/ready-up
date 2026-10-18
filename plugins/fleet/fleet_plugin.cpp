@@ -36,10 +36,13 @@
 // Commands: `ru fleet status|enroll [url] <code|key> [--insecure]|reconnect` (console / RCON; also plain
 // `fleet ...`), `.fleet status|reconnect` / `.ru fleet ...` (admins, chat).
 #include "readyup/fleet_iface.h"
+#include "readyup/match_iface.h"
 #include "readyup/plugin_api.h"
 #include "readyup/plugin_needs_iface.h"
+#include "readyup/essentials_iface.h"
 #include "readyup/practice_iface.h"
 #include "readyup/selftest_iface.h"
+#include "readyup/tv_iface.h"
 #include "readyup/whitelist_iface.h"
 
 #include "fleet_client.h"
@@ -128,6 +131,11 @@ int64_t g_offlineFiredFor = -1;
 // (kept in the stash across `ru plugin reload fleet`) and when it was last read (game thread).
 std::string g_selftestSent;
 double g_lastSelftestPoll = 0.0;
+// tv.so's GOTV state (readyup.tv.v1; docs/design/tv-plugin.md): the rev last read, the tvState last
+// sent as server.tv and when.
+uint64_t g_tvRev = 0;
+std::string g_tvSent;
+double g_tvSentAt = -1e9;
 
 void Log(int level, const char* fmt, ...) RU_PRINTF(2, 3);
 void Log(int level, const char* fmt, ...) {
@@ -343,6 +351,7 @@ void BuildHello() {
   h.stateJson.clear();     // keep whatever publish_state set
   h.availability.clear();
   g_hello = h;
+  g_tvRev = 0;  // hello.tv: read again on the next poll
 }
 
 // ---- handlers ------------------------------------------------------------------------------
@@ -549,6 +558,61 @@ std::string MemberStr(const fleet::json::Value& v, const char* key, const std::s
   return m && m->IsStr() ? m->s : def;
 }
 
+// ---- tv.so (readyup.tv.v1) --------------------------------------------------------------------
+
+const ru_tv_v1* TvIface() {
+  const auto* tv = static_cast<const ru_tv_v1*>(g_api->get_interface(g_api->self, RU_TV_IFACE_NAME, RU_TV_IFACE_VERSION));
+  if (!tv || tv->struct_size < offsetof(ru_tv_v1, tv_set) + sizeof(tv->tv_set) || !tv->state_rev || !tv->state_json) return nullptr;
+  return tv;
+}
+
+std::string TvStateJson(const ru_tv_v1* tv) {
+  std::string buf(2048, '\0');
+  int n = tv->state_json(buf.data(), static_cast<uint32_t>(buf.size()));
+  if (n < 0) return {};
+  if (static_cast<size_t>(n) >= buf.size()) {
+    if (n > 65536) return {};
+    buf.assign(static_cast<size_t>(n) + 1, '\0');
+    n = tv->state_json(buf.data(), static_cast<uint32_t>(buf.size()));
+    if (n < 0) return {};
+  }
+  buf.resize(std::min(static_cast<size_t>(n), buf.size() - 1));
+  fleet::json::Value v;
+  return fleet::json::Parse(buf, &v) && v.IsObj() ? buf : std::string();
+}
+
+// hello.tv / state.snapshot.tv carry the latest tvState; server.tv (reliable) goes out when it
+// changed, at most every 5 s and only while online (a reconnect's hello carries the latest).
+void PollTv(fleet::Client& c, double now) {
+  const ru_tv_v1* tv = TvIface();
+  if (!tv) {
+    g_tvRev = 0;
+    if (!g_hello.tvJson.empty()) {
+      g_hello.tvJson.clear();
+      c.SetHelloInfo(g_hello);
+    }
+    return;
+  }
+  const uint64_t rev = tv->state_rev();
+  if (rev != g_tvRev) {
+    g_tvRev = rev;
+    const std::string j = TvStateJson(tv);
+    if (j != g_hello.tvJson) {
+      g_hello.tvJson = j;
+      c.SetHelloInfo(g_hello);
+    }
+  }
+  if (g_hello.tvJson.empty() || g_hello.tvJson == g_tvSent || now - g_tvSentAt < 5.0) return;
+  if (c.Status().state != LinkState::Online) return;
+  std::string err;
+  if (!c.Send("server.tv", g_hello.tvJson, 0, true, &err)) {
+    Log(RU_LOG_WARN, "fleet: server.tv not queued: %s", err.c_str());
+    return;
+  }
+  g_tvSent = g_hello.tvJson;
+  g_tvSentAt = now;
+}
+
 // ---- cmd: the commands fleet.so runs itself (fleet_cmds.h) --------------------------------------
 
 fleet::cmds::Result RunOwnedCmd(const std::string& name, const fleet::json::Value& args) {
@@ -580,9 +644,35 @@ fleet::cmds::Result RunOwnedCmd(const std::string& name, const fleet::json::Valu
   if (name == "practice.set") {
     // {on?, always?}: always first, so {on: true, always: true} makes a dedicated practice server.
     int on = -1, always = -1;
-    if (!ParsePracticeSet(args, &on, &always, &err)) return Rejected("bad_args", err);
+    bool hasHome = false, hasCvars = false;
+    std::string home;
+    std::vector<std::string> cvars;
+    if (!ParsePracticeSet(args, &on, &always, &err, &hasHome, &home, &hasCvars, &cvars)) return Rejected("bad_args", err);
+    // home_map: essentials.so's default map for "practice"; an empty always=1 server goes there.
+    if (hasHome) {
+      const auto* e = static_cast<const ru_essentials_v1*>(
+          g_api->get_interface(g_api->self, RU_ESSENTIALS_IFACE_NAME, RU_ESSENTIALS_IFACE_VERSION));
+      if (!e || e->struct_size < offsetof(ru_essentials_v1, set_default_map) + sizeof(e->set_default_map) ||
+          !e->set_default_map) {
+        return Rejected("unsupported", "home_map needs essentials.so (update Ready Up)");
+      }
+      if (e->set_default_map("practice", home.c_str()) != 1) return Rejected("bad_args", "home_map: not a map name, workshop id or link");
+      if (on < 0 && always < 0 && !hasCvars) return Ok();
+    }
     const auto* p = static_cast<const ru_practice_v1*>(g_api->get_interface(g_api->self, RU_PRACTICE_IFACE_NAME, 1));
     if (!p || !p->set_active) return Rejected("unsupported", "the practice plugin (practice.so) is not loaded");
+    // home_cvars: the home map's settings (a surf map's air acceleration ...), practice.so applies them.
+    if (hasCvars) {
+      if (p->struct_size < offsetof(ru_practice_v1, set_home_cvars) + sizeof(p->set_home_cvars) || !p->set_home_cvars) {
+        return Rejected("unsupported", "home_cvars needs a newer practice.so (update Ready Up)");
+      }
+      std::vector<const char*> ptrs;
+      for (const auto& c : cvars) ptrs.push_back(c.c_str());
+      if (p->set_home_cvars(ptrs.data(), static_cast<uint32_t>(ptrs.size())) != 1) {
+        return Rejected("bad_args", "home_cvars: each a \"sv_/mp_<name> <number>\" line");
+      }
+      if (on < 0 && always < 0) return Ok();
+    }
     if (always >= 0) {
       if (p->struct_size < offsetof(ru_practice_v1, set_always) + sizeof(p->set_always) || !p->set_always) {
         return Rejected("unsupported", "this practice.so cannot store always (update Ready Up)");
@@ -596,12 +686,81 @@ fleet::cmds::Result RunOwnedCmd(const std::string& name, const fleet::json::Valu
     return Ok();
   }
   if (name == "say") {
-    const std::string text = SanitizeSay(MemberStr(args, "text"));
-    if (text.empty()) return Rejected("bad_args", "empty text");
-    const fleet::json::Value* asAdmin = Member(args, "as_admin");
-    const std::string line = asAdmin && asAdmin->AsBool() ? "[Admin] " + text : text;
-    if (!g_api->chat_all(g_api->self, line.c_str(), 0)) return Failed("engine", "chat is unavailable");
+    // {text, as_admin?, from?, to?, team?, center_seconds?, important?}. Longer text: up to 3 lines.
+    const std::vector<std::string> lines = fleet::cmds::SplitSay(MemberStr(args, "text"));
+    if (lines.empty()) return Rejected("bad_args", "empty text");
+    const std::string text = SanitizeSay(MemberStr(args, "text"), fleet::cmds::kSayLineBytes * fleet::cmds::kSayMaxLines);
+    // {as_admin}: an admin's line stands out, a red [ADMIN] (with {from}, the admin's name), no
+    // Ready Up prefix. Without as_admin it is the platform's own notice: plain, `from` unused.
+    const fleet::json::Value* asAdminArg = Member(args, "as_admin");
+    const bool admin = asAdminArg && asAdminArg->AsBool();
+    std::string from = admin ? SanitizeSay(MemberStr(args, "from"), 32) : std::string();
+    while (!from.empty() && from.back() == ' ') from.pop_back();
+    std::vector<std::string> out;
+    for (const auto& l : lines) out.push_back(admin ? fleet::cmds::AdminSayLine(from, l) : l);
+    const fleet::json::Value* centerArg = Member(args, "center_seconds");
+    const int center = fleet::cmds::SayCenterSeconds(centerArg ? centerArg->AsInt(0) : 0);
+    const std::string centerHtml = center ? fleet::cmds::SayCenterHtml(from.empty() ? text : from + ": " + text) : std::string();
+    auto toSlot = [&](int slot) {
+      bool sent = false;
+      for (const auto& l : out) sent = g_api->chat_to_slot(g_api->self, slot, l.c_str()) == 1 || sent;
+      if (sent && center) g_api->center_html_to_slot(g_api->self, slot, centerHtml.c_str(), center);
+      return sent;
+    };
+    // {to}: one player (a SteamID64 string), e.g. "your loadout is updated"; not on the server: nothing to do.
+    const std::string to = MemberStr(args, "to");
+    if (!to.empty()) {
+      const uint64_t steamid = std::strtoull(to.c_str(), nullptr, 10);
+      const int slot = steamid ? g_api->slot_for_steamid(g_api->self, steamid) : -1;
+      if (slot < 0) return Ok();
+      if (!toSlot(slot)) return Failed("engine", "chat is unavailable");
+      return Ok();
+    }
+    // {team}: only that team's roster players (the match plugin knows the roster).
+    const int team = fleet::cmds::SayTeam(MemberStr(args, "team"));
+    if (team < 0) return Rejected("bad_args", "team must be team1 or team2");
+    if (team > 0) {
+      const auto* m = static_cast<const ru_match_v1*>(g_api->get_interface(g_api->self, RU_MATCH_IFACE_NAME, 1));
+      if (!m || m->struct_size < offsetof(ru_match_v1, roster_team) + sizeof(m->roster_team) || !m->roster_team) {
+        return Rejected("unsupported", "say to a team needs the match plugin (update Ready Up)");
+      }
+      struct Ctx {
+        const ru_match_v1* m;
+        int team;
+        std::vector<int> slots;
+      } ctx{m, team, {}};
+      g_api->for_each_player(
+          g_api->self,
+          [](void* user, const ru_player* p) -> int {
+            auto* c = static_cast<Ctx*>(user);
+            if (!p->is_bot && p->steamid64 && p->slot >= 0 && c->m->roster_team(p->steamid64) == c->team) c->slots.push_back(p->slot);
+            return 1;
+          },
+          &ctx);
+      for (int slot : ctx.slots) (void)toSlot(slot);
+      return Ok();
+    }
+    const fleet::json::Value* importantArg = Member(args, "important");
+    const uint32_t chatFlags = (importantArg && importantArg->AsBool() ? RU_CHAT_IMPORTANT : 0) | (admin ? RU_CHAT_RAW : 0);
+    for (const auto& l : out) {
+      if (!g_api->chat_all(g_api->self, l.c_str(), chatFlags)) return Failed("engine", "chat is unavailable");
+    }
+    if (center) g_api->center_html_all(g_api->self, centerHtml.c_str(), center);
     return Ok();
+  }
+  if (name == "tv.set") {
+    // {scope: server|match, settings?, casters?}: tv.so validates and applies it (all or nothing).
+    const ru_tv_v1* tv = TvIface();
+    if (!tv || !tv->tv_set) return Rejected("unsupported", "the tv plugin (tv.so) is not loaded");
+    char code[32] = {0};
+    char msg[512] = {0};
+    if (tv->tv_set(fleet::json::Dump(args).c_str(), code, sizeof(code), msg, sizeof(msg)) == 1) {
+      if (auto c = Client()) PollTv(*c, g_lastTickNow);  // hello / snapshot carry it at once
+      return Ok();
+    }
+    const std::string c = code;
+    if (c == "io") return Failed("io", msg);
+    return Rejected(c == "bad_phase" ? "bad_phase" : "bad_args", msg);
   }
   return Rejected("unknown_command", "unknown cmd \"" + name + "\"");
 }
@@ -1183,6 +1342,19 @@ int CountPlayers() {
   return n;
 }
 
+// The connected humans' Steam ids, for ping.health.steamids.
+std::vector<uint64_t> ConnectedSteamIds() {
+  std::vector<uint64_t> ids;
+  g_api->for_each_player(
+      g_api->self,
+      [](void* u, const ru_player* p) {
+        if (p->connected && !p->is_bot && p->steamid64) static_cast<std::vector<uint64_t>*>(u)->push_back(p->steamid64);
+        return 1;
+      },
+      &ids);
+  return ids;
+}
+
 // A new core selftest outcome (pass/fail, counts or the failing checks changed): hello carries it
 // from now on, and the platform gets `server.selftest` (reliable) right away. A re-run with the
 // same outcome sends nothing.
@@ -1299,12 +1471,13 @@ void OnTick(void*, const ru_tick_info* t) {
       std::nth_element(v.begin(), v.begin() + static_cast<long>(k), v.end());
       p99 = v[k];
     }
-    c->UpdateHealth(CountPlayers(), p99);
+    c->UpdateHealth(CountPlayers(), p99, ConnectedSteamIds());
     MaybeQueryAddr(t->now);
     if (t->now - g_lastSelftestPoll >= 5.0) {
       g_lastSelftestPoll = t->now;
       PollSelftest(*c);
     }
+    PollTv(*c, t->now);
 
     // Offline timer (D12). The auto-pause itself lands with the match plugin; this fires the
     // hook once per offline period.
@@ -1348,6 +1521,9 @@ READYUP_PLUGIN_EXPORT int readyup_plugin_load(const ru_api* api, uint32_t core_a
     g_caps.clear();
     g_frameMs.clear();
     g_lastTickNow = g_lastHousekeeping = g_lastSelftestPoll = 0.0;
+    g_tvRev = 0;
+    g_tvSent.clear();
+    g_tvSentAt = -1e9;
     g_offlineFiredFor = -1;
     g_addrQuery = AddrQuery::Idle;
     g_selftestSent.clear();
@@ -1390,6 +1566,13 @@ READYUP_PLUGIN_EXPORT int readyup_plugin_load(const ru_api* api, uint32_t core_a
                                                        : !g_set.code.empty() ? "enrolling with the one-time code"
                                                                              : "not enrolled (ru fleet enroll <code>)"));
       StartClient(g_set.url);  // failure is logged and shown by status/selftest; the plugin stays loaded
+      // An empty server hibernates and runs no game frames, and the platform's
+      // commands (assign a match, load its config) are applied on the game
+      // thread: a hibernating server would only take its match once a player
+      // joined. A server the platform runs stays awake.
+      if (!api->server_command(api->self, "sv_hibernate_when_empty 0")) {
+        Log(RU_LOG_WARN, "fleet: could not queue sv_hibernate_when_empty 0; set it in server.cfg");
+      }
     }
     return 0;
   } catch (const std::exception& e) {

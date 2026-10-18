@@ -114,6 +114,27 @@ int ParseRestoreRound(const std::string& arg, std::string* err) {
   return std::atoi(arg.c_str());
 }
 
+const char* BackupFlagHint() {
+  return "CS2 writes round backups only when started with -allow_round_backup_files (csm 1.27.4+ adds it; "
+         "restart the server)";
+}
+
+std::string ExplainRestoreError(const std::string& err) {
+  if (err.rfind("no backup ", 0) != 0) return err;
+  return err + ". " + BackupFlagHint();
+}
+
+bool CmdlineHasArg(const std::string& raw, const std::string& arg) {
+  size_t i = 0;
+  while (i <= raw.size()) {
+    size_t e = raw.find('\0', i);
+    if (e == std::string::npos) e = raw.size();
+    if (raw.compare(i, e - i, arg) == 0 && e - i == arg.size()) return true;
+    i = e + 1;
+  }
+  return false;
+}
+
 std::string RestoreRefusal(const RestoreCheck& c) {
   if (!c.match_loaded) return "no match loaded.";
   if (!c.live) return "a restore needs a live map.";

@@ -244,11 +244,24 @@ void Client::SetHelloInfo(HelloInfo info) {
   hello_.availabilityDetail = std::move(detail);
 }
 
-void Client::UpdateHealth(int players, double tickMsP99) {
+void Client::UpdateHealth(int players, double tickMsP99, std::vector<uint64_t> steamids) {
   players_.store(players, std::memory_order_relaxed);
-  std::lock_guard<std::mutex> lk(mu_);
-  hello_.players = players;
-  hello_.tickMsP99 = tickMsP99;
+  bool arrived = false;
+  {
+    std::lock_guard<std::mutex> lk(mu_);
+    for (uint64_t id : steamids) {
+      if (std::find(hello_.steamids.begin(), hello_.steamids.end(), id) == hello_.steamids.end()) arrived = true;
+    }
+    hello_.players = players;
+    hello_.steamids = std::move(steamids);
+    hello_.tickMsP99 = tickMsP99;
+  }
+  // A player joined: ping now, not at the next heartbeat. On a server without a match the ping's
+  // steamids is how the platform learns who is there and sends their skins (up to 10 s late before).
+  if (arrived) {
+    pingSoon_.store(true, std::memory_order_relaxed);
+    Wake();
+  }
 }
 
 void Client::NoteGameFrame() { lastFrameMono_.store(MonotonicMs(), std::memory_order_relaxed); }
@@ -806,6 +819,11 @@ std::string Client::BuildHello() {
     json::Value st;
     if (json::Parse(h.selftestJson, &st) && st.IsObj()) p.Set("selftest", std::move(st));
   }
+  // GOTV state from the tv plugin (docs/design/tv-plugin.md); left out without tv.so.
+  if (!h.tvJson.empty()) {
+    json::Value tv;
+    if (json::Parse(h.tvJson, &tv) && tv.IsObj()) p.Set("tv", std::move(tv));
+  }
   return json::Dump(p);
 }
 
@@ -831,6 +849,10 @@ std::string Client::BuildSnapshot(const char* reason, const std::string& extraJs
   p.Set("availability_detail", NullOrStr(h.availabilityDetail));
   p.Set("config_rev", json::Value::Int(configRev));
   p.Set("admins_rev", json::Value::Int(h.adminsRev > 0 ? h.adminsRev : 0));
+  if (!h.tvJson.empty()) {
+    json::Value tv;
+    if (json::Parse(h.tvJson, &tv) && tv.IsObj()) p.Set("tv", std::move(tv));
+  }
   // Extra members from the match plugin (map_stats), never overriding the ones above.
   json::Value extra;
   if (!extraJson.empty() && json::Parse(extraJson, &extra) && extra.IsObj()) {
@@ -1071,6 +1093,7 @@ Client::SessionResult Client::RunSession() {
 
   // 4. steady state
   int64_t nextPing = MonotonicMs() + s.intervalMs;
+  int64_t lastPingMono = 0;
   std::vector<Out> eph;
   while (!s.broken) {
     if (stop_) {
@@ -1136,7 +1159,9 @@ Client::SessionResult Client::RunSession() {
       sendEphemeral("ack", "{}");
     }
     const int64_t now = MonotonicMs();
+    if (pingSoon_.exchange(false, std::memory_order_relaxed) && now - lastPingMono >= 1000) nextPing = now;
     if (!s.broken && now >= nextPing) {
+      lastPingMono = now;
       HelloInfo h;
       {
         std::lock_guard<std::mutex> lk(mu_);
@@ -1146,6 +1171,11 @@ Client::SessionResult Client::RunSession() {
       p.Set("t", json::Value::Int(NowMs()));
       json::Value health = json::Value::Object();
       health.Set("players", json::Value::Int(h.players));
+      if (!h.steamids.empty()) {
+        json::Value ids = json::Value::Array();
+        for (uint64_t id : h.steamids) ids.Push(json::Value::Str(std::to_string(id)));
+        health.Set("steamids", std::move(ids));
+      }
       health.Set("tick_ms_p99", json::Value::Num(std::round(h.tickMsP99 * 100.0) / 100.0));
       health.Set("spool_msgs", json::Value::Int(static_cast<int64_t>(spool_.count())));
       health.Set("uptime_s", json::Value::Int(h.startedMs > 0 ? (NowMs() - h.startedMs) / 1000 : 0));

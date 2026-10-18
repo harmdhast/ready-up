@@ -67,7 +67,7 @@ std::string Restore(int round, const std::string& by, const Reply& announce) {
   if (std::string why = restore::RestoreRefusal(c); !why.empty()) return why;
   std::string err;
   bool autoUnpause = false;
-  if (!fleet_bridge::RestoreRoundFromLocalBackup(round, by, "admin", &err, &autoUnpause)) return err + ".";
+  if (!fleet_bridge::RestoreRoundFromLocalBackup(round, by, "admin", &err, &autoUnpause)) return restore::ExplainRestoreError(err) + ".";
   Print("restore: round %d restored by %s%s\n", round, by.c_str(), autoUnpause ? " (live in 3 s)" : "");
   if (autoUnpause) {
     announce("round " + std::to_string(round) + " restored by " + by + ". Live in 3 seconds.");

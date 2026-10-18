@@ -80,4 +80,29 @@ const char* HelpLine() {
          ".savenade .loadnade .listnades | .dryrun | .prac to leave";
 }
 
+bool ValidHomeCvar(const std::string& line) {
+  if (line.size() < 6 || line.size() > 96) return false;
+  if (line.compare(0, 3, "sv_") != 0 && line.compare(0, 3, "mp_") != 0) return false;
+  const size_t sp = line.find(' ');
+  if (sp == std::string::npos || sp < 4) return false;
+  for (size_t i = 0; i < sp; ++i) {
+    const char c = line[i];
+    if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_')) return false;
+  }
+  std::string v = line.substr(sp + 1);
+  if (v.empty()) return false;
+  size_t i = v[0] == '-' ? 1 : 0;
+  bool digits = false, dot = false;
+  for (; i < v.size(); ++i) {
+    if (v[i] >= '0' && v[i] <= '9') {
+      digits = true;
+    } else if (v[i] == '.' && !dot) {
+      dot = true;
+    } else {
+      return false;
+    }
+  }
+  return digits;
+}
+
 }  // namespace practice

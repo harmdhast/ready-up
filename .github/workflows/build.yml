@@ -3,7 +3,7 @@ name: Build
 # Release build of libserver.so + plugins in Valve's Steam Runtime 3 "sniper" SDK (glibc 2.31,
 # what CS2 targets), verified against the CURRENT public CS2 build (sigcheck + hook-site check,
 # base gamedata + every fragment). Every run uploads the install zips as workflow artifacts:
-# ready-up-{core,match,fleet,practice,essentials-plugin,skins,hello,midas,whitelist,deathmatch,addons}-<version>-linuxsteamrt64.zip
+# ready-up-{core,match,fleet,practice,essentials-plugin,skins,hello,midas,whitelist,deathmatch,mapvote,community,movement,addons,tv}-<version>-linuxsteamrt64.zip
 # (components), ready-up-{essentials,full}-<version>-linuxsteamrt64.zip (bundles) + SHA256SUMS.
 # The installer job then tests install.sh against those zips. Tags v* additionally publish a
 # GitHub release with the same files: vX.Y.Z is marked latest, vX.Y.Z-beta.N / -rc.N are
@@ -27,6 +27,8 @@ jobs:
   build:
     name: Build (sniper) + verify vs current CS2
     runs-on: ubuntu-latest
+    # Starting this container takes ~75 s (unpacking the SDK). A GHCR mirror was tried
+    # (2026-10-15) and was no faster, so the image comes straight from Valve.
     container:
       image: registry.gitlab.steamos.cloud/steamrt/sniper/sdk:latest
     env:
@@ -143,8 +145,8 @@ jobs:
         run: scripts/ci/check-bundles.sh dist "${{ steps.version.outputs.version }}"
 
       # One artifact with everything (what the installer job and the release use), plus one
-      # per zip so a single zip can be downloaded from the run page. Artifacts only: no
-      # release is created here.
+      # per zip so a single zip can be downloaded from the run page (not on pull requests:
+      # 15 uploads, ~15 s). Artifacts only: no release is created here.
       - name: Upload artifact (all zips)
         uses: actions/upload-artifact@v4
         with:
@@ -156,6 +158,7 @@ jobs:
           retention-days: 30
 
       - name: Upload ready-up-essentials
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: ready-up-essentials-${{ steps.version.outputs.version }}
@@ -164,6 +167,7 @@ jobs:
           retention-days: 30
 
       - name: Upload ready-up-full
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: ready-up-full-${{ steps.version.outputs.version }}
@@ -172,6 +176,7 @@ jobs:
           retention-days: 30
 
       - name: Upload ready-up-core
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: ready-up-core-${{ steps.version.outputs.version }}
@@ -180,6 +185,7 @@ jobs:
           retention-days: 30
 
       - name: Upload ready-up-match
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: ready-up-match-${{ steps.version.outputs.version }}
@@ -188,6 +194,7 @@ jobs:
           retention-days: 30
 
       - name: Upload ready-up-fleet
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: ready-up-fleet-${{ steps.version.outputs.version }}
@@ -196,6 +203,7 @@ jobs:
           retention-days: 30
 
       - name: Upload ready-up-skins
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: ready-up-skins-${{ steps.version.outputs.version }}
@@ -204,6 +212,7 @@ jobs:
           retention-days: 30
 
       - name: Upload ready-up-practice
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: ready-up-practice-${{ steps.version.outputs.version }}
@@ -212,6 +221,7 @@ jobs:
           retention-days: 30
 
       - name: Upload ready-up-essentials-plugin
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: ready-up-essentials-plugin-${{ steps.version.outputs.version }}
@@ -220,6 +230,7 @@ jobs:
           retention-days: 30
 
       - name: Upload ready-up-hello
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: ready-up-hello-${{ steps.version.outputs.version }}
@@ -228,6 +239,7 @@ jobs:
           retention-days: 30
 
       - name: Upload ready-up-midas
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: ready-up-midas-${{ steps.version.outputs.version }}
@@ -236,6 +248,7 @@ jobs:
           retention-days: 30
 
       - name: Upload ready-up-whitelist
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: ready-up-whitelist-${{ steps.version.outputs.version }}
@@ -244,6 +257,7 @@ jobs:
           retention-days: 30
 
       - name: Upload ready-up-deathmatch
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: ready-up-deathmatch-${{ steps.version.outputs.version }}
@@ -251,7 +265,44 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      - name: Upload ready-up-mapvote
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ready-up-mapvote-${{ steps.version.outputs.version }}
+          path: dist/ready-up-mapvote-*.zip
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload ready-up-community
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ready-up-community-${{ steps.version.outputs.version }}
+          path: dist/ready-up-community-*.zip
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload ready-up-movement
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ready-up-movement-${{ steps.version.outputs.version }}
+          path: dist/ready-up-movement-*.zip
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload ready-up-tv
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ready-up-tv-${{ steps.version.outputs.version }}
+          path: dist/ready-up-tv-*.zip
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Upload ready-up-addons
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: ready-up-addons-${{ steps.version.outputs.version }}

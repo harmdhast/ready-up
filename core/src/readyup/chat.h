@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 namespace readyup {
 
 // Best-effort broadcast to in-game chat (server "say").
@@ -14,6 +16,10 @@ void SendToChat(const char* msg);
 // Sends a raw chat payload (no chat prefix such as "[Ready Up]" added).
 // Payload may include CS-style color codes (best-effort).
 void SendRawToChat(const char* payload);
+
+// A line that must not be missed (RU_CHAT_IMPORTANT): the prefix, then the text in gold, sent
+// three times so it fills the chat.
+void SendImportantToChat(const char* msg);
 
 // The same line (with the chat prefix) to one player only; false if the slot or the engine
 // function is unavailable (callers then fall back to SendToChat).

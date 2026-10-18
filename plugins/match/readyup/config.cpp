@@ -156,8 +156,10 @@ void Apply(ReadyUpCfg* out, const std::string& key, const std::string& val) {
   // Rules: 0 is a real value (unlimited / off), so no ParseInt here.
   else if (key == "max_tech_pauses_per_team") out->rules.tech_pauses_per_team = RuleInt(val);
   else if (key == "tech_pause_max_seconds") out->rules.tech_pause_max_seconds = RuleInt(val);
+  else if (key == "disconnect_pause_max_seconds") out->rules.disconnect_pause_max_seconds = RuleInt(val);
   else if (key == "both_teams_unpause_required") out->rules.both_teams_unpause = ParseBool(val, true) ? 1 : 0;
   else if (key == "allow_force_ready") out->rules.allow_force_ready = ParseBool(val, true) ? 1 : 0;
+  else if (key == "team_ready") out->rules.team_ready = ParseBool(val, false) ? 1 : 0;
   else if (key == "min_players_to_ready") out->rules.min_players_to_ready = RuleInt(val);
   else if (key == "forfeit_after_seconds") out->rules.forfeit_after_seconds = RuleInt(val);
   else if (key == "gg_enabled") out->rules.gg_enabled = ParseBool(val, false) ? 1 : 0;

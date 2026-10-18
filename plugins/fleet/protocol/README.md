@@ -35,12 +35,12 @@ consume them: [`docs/fleet-step3-platform-notes.md`](../../../docs/fleet-step3-p
 | `messages/state.snapshot.json` | server → platform | ephemeral | |
 | `messages/state.patch.json` | server → platform | reliable | |
 | `messages/server.availability.json` | server → platform | reliable | |
-| `messages/event.<name>.json` (22) | server → platform | reliable | |
+| `messages/event.<name>.json` (23) | server → platform | reliable | |
 
 Events: `player_connect`, `player_disconnect`, `player_team`, `player_ready`, `player_unready`,
 `phase`, `knife_result`, `side_picked`, `round_start`, `round_end`, `backup`, `pause`, `halftime`,
 `overtime`, `rounds_voided`, `map_result`, `series_end`, `demo`, `match_restored`, `forfeit`, `gg`,
-`admin_called` (and `error`, reserved).
+`admin_called`, `chat` (and `error`, reserved).
 
 Differences from the FLEET.md text, decided while implementing:
 
@@ -89,8 +89,9 @@ has to build: [`docs/fleet-step3-platform-notes.md`](../../../docs/fleet-step3-p
 | `messages/skins.loadout.json` | platform → server | reliable | ack only |
 | `messages/skins.invalidate.json` | platform → server | reliable | ack only |
 | `messages/skins.stattrak.json` | server → platform | reliable (critical) | |
+| `messages/movement.record.json` | server → platform | reliable | |
 
-Examples: `examples/v1/{admins.set,skins.loadout,skins.invalidate,skins.stattrak}.json`.
+Examples: `examples/v1/{admins.set,skins.loadout,skins.invalidate,skins.stattrak,movement.record}.json`.
 
 `hello` (a copied step-1 schema) gets one proposed optional member, `admins_rev`: the rev of the
 admins.set list the server has cached (absent = none). `state.snapshot.admins_rev` carries the
@@ -126,3 +127,22 @@ Examples: `examples/v1/logs.{start,stop,lines}.json`.
   (`tests/schema_check.cpp`), so a schema that no longer matches what Ready Up produces fails CI.
 - `scripts/livetest/fleet_livetest.py`: a Python mock platform (`fleet_mock_platform.py`, Docker)
   validates every frame of a real bot match with `jsonschema` (draft 2020-12).
+
+## GOTV (tv plugin): proposed here — the platform must adopt them
+
+**Status: proposed — platform must adopt.** The tv plugin (`plugins/tv`,
+[`docs/design/tv-plugin.md`](../../../docs/design/tv-plugin.md)) owns the server's GOTV settings.
+Capability `tv.v1`. Examples: `examples/v1/{match.assign.broadcast,cmd.tv.set,server.tv,hello.tv}.json`.
+
+| File | Direction | Delivery | Answer |
+|---|---|---|---|
+| `tv.defs.json` (new) | shared `$defs`: `broadcastProfile`, `broadcastSettings` (tv.set: null clears), `tvState` | | |
+| `match.defs.json` | `rules.broadcast`, the platform's own definition (auto-tournament#1037), byte for byte the same JSON; Ready Up refuses (invalid_config) a delay below the match's own tv_delay or a key against `config.cvars` | | |
+| `messages/cmd.json` | `tv.set {scope: server\|match, settings?, casters?}` (fleet.so → tv.so) | reliable | `cmd.result` |
+| `messages/server.tv.json` (new) | server → platform: `tvState` when it changed (≤ every 5 s, online only) | reliable | |
+| `messages/hello.json`, `messages/state.snapshot.json` | optional `tv`: `tvState` | | |
+
+`tvState` never carries the GOTV password, only `password_set`. The platform repo's
+fleet-protocol-sync test compares these files, so copy them over unchanged (`tv.defs.json`,
+`messages/server.tv.json`, and the edited `messages/{hello,state.snapshot,cmd}.json`; `match.defs.json`
+already matches).

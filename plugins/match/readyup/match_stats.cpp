@@ -342,6 +342,19 @@ class Obj {
     body_ += raw;
     return *this;
   }
+  // The round's economy fields, when they were read (PlayerRound money_start >= 0).
+  Obj& Econ(const PlayerRound& p) {
+    if (p.money_start < 0 && p.money_after_buy < 0) return *this;
+    std::string lo = "[";
+    for (size_t i = 0; i < p.loadout.size(); ++i) lo += (i ? ",\"" : "\"") + JsonEscape(p.loadout[i]) + "\"";
+    lo += "]";
+    return I("money_start", p.money_start)
+        .I("money_after_buy", p.money_after_buy)
+        .I("armor", p.armor)
+        .B("helmet", p.helmet)
+        .B("defuser", p.defuser)
+        .R("loadout", lo);
+  }
   std::string Done() const { return "{" + body_ + "}"; }
 
  private:
@@ -392,6 +405,22 @@ std::string ToJson(const PlayerStats& s) {
       .Done();
 }
 
+void StatsAccumulator::SetMoneyStart(uint64_t id, int money) {
+  if (!live_ || id == 0) return;
+  R(id).money_start = money;
+}
+
+void StatsAccumulator::SetLoadout(uint64_t id, int moneyAfterBuy, int armor, bool helmet, bool defuser,
+                                  const std::vector<std::string>& loadout) {
+  if (!live_ || id == 0) return;
+  auto& r = R(id);
+  r.money_after_buy = moneyAfterBuy;
+  r.armor = armor;
+  r.helmet = helmet;
+  r.defuser = defuser;
+  r.loadout = loadout;
+}
+
 std::string ToJson(const RoundSummary& r) {
   std::string players = "[";
   for (size_t i = 0; i < r.players.size(); ++i) {
@@ -415,6 +444,7 @@ std::string ToJson(const RoundSummary& r) {
                                     .B("mvp", p.mvp)
                                     .I("clutch_vs", p.clutch_vs)
                                     .B("clutch_won", p.clutch_won)
+                                    .Econ(p)
                                     .Done();
   }
   players += "]";
@@ -571,6 +601,17 @@ bool FromJson(const std::string& json, MapStats* out) {
           x.mvp = JB(&p, "mvp");
           x.clutch_vs = JI(&p, "clutch_vs");
           x.clutch_won = JB(&p, "clutch_won");
+          if (p.get("money_start")) {
+            x.money_start = JI(&p, "money_start");
+            x.money_after_buy = JI(&p, "money_after_buy");
+            x.armor = JI(&p, "armor");
+            x.helmet = JB(&p, "helmet");
+            x.defuser = JB(&p, "defuser");
+            if (const Value* lo = p.get("loadout"); lo && lo->type == Value::Type::Array) {
+              for (const auto& it : lo->arr)
+                if (it.type == Value::Type::String) x.loadout.push_back(it.str);
+            }
+          }
           s.players.push_back(x);
         }
       }

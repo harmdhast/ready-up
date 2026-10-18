@@ -50,6 +50,7 @@ std::mutex g_mu;  // guards g_cache, g_fleet, g_fleetRev
 std::unordered_map<uint64_t, CacheEntry> g_cache;
 std::unordered_map<uint64_t, Loadout> g_fleet;  // fleet mode: last skins.loadout per player
 std::unordered_map<uint64_t, int64_t> g_fleetRev;
+std::unordered_map<uint64_t, std::string> g_fleetItems;  // the last items received (to tell a change)
 std::atomic<bool> g_fleetMode{false};
 
 // ---- worker ---------------------------------------------------------------------------
@@ -378,16 +379,31 @@ void OnFleetMessage(void*, const ru_fleet_msg* m) {
       std::lock_guard<std::mutex> lk(g_mu);
       auto r = g_fleetRev.find(sid);
       if (r != g_fleetRev.end() && rev < r->second) return;  // replay of an older loadout
+      // The first loadout of a player (the platform sends it when they join) is not a change: the
+      // weapons they spawn with get it anyway. Re-giving on it removed and re-created their weapons
+      // right as Ready Up restarted the round for the join, and their client crashed
+      // (CopyExistingEntity / OnPreserveEntity: missing client entity, 2026-10-14).
+      // The platform stamps every send with a new rev (a rejoin too): compare the items.
+      const std::string itemsKey = items ? readyup::json_store::Pretty(*items) : std::string();
+      const auto prev = g_fleetItems.find(sid);
+      const bool changed = prev != g_fleetItems.end() && prev->second != itemsKey;
+      const bool firstLoadout = prev == g_fleetItems.end();
+      g_fleetItems[sid] = itemsKey;
       g_fleetRev[sid] = rev;
       g_fleet[sid] = l;
       CacheEntry& e = g_cache[sid];
       e.loadout = std::move(l);
       e.loaded_at = Clock::now();
       SKINS_DEBUG("fleet: skins.loadout %llu rev %lld", static_cast<unsigned long long>(sid), static_cast<long long>(rev));
+      if (changed) QueueWarmupRegive(sid);  // warmup: the held weapons get the new skins now
+      // The first one may come after the player spawned (asked for on connect): paint what they
+      // hold, or the first life on a server without a match was all stock (#339).
+      if (firstLoadout) QueueFirstLoadoutRepaint(sid);
     } else if (type == "skins.invalidate") {
       std::lock_guard<std::mutex> lk(g_mu);
       g_fleet.erase(sid);
       g_fleetRev.erase(sid);
+      g_fleetItems.erase(sid);
       g_cache.erase(sid);
     }
   } catch (...) {

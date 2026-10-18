@@ -1,8 +1,14 @@
 #pragma once
 
-// The license key status on this server (license.h does the check). Informational only: nothing
-// is ever blocked, disabled or degraded, and a server without a key (free non-commercial use)
-// gets one console line and nothing else.
+// The license key status on this server (license.h does the check). A server without a key (free
+// non-commercial use) gets one console line and nothing else. A genuine paid key that has stopped
+// (unpaid past its 14 days of grace, replaced by a new key a day ago, or in use on another
+// Auto Tournament install; license.h StandingFor) refuses new matches until it is sorted
+// (StoppedMessage). Running matches are never touched.
+//
+// CS2 Server Manager writes, next to the key: `readyup_license_lease "ATL1..."` (the license's
+// current terms; the key never changes on renewal) and `readyup_license_state "<status>
+// [<stops_on>]"` (what the license server last said).
 //
 // Where the key comes from: the console setting `readyup_license_key "ATL1..."`, from any cfg
 // the server runs (server.cfg, or readyup_license.cfg, which CS2 Server Manager writes and execs
@@ -18,6 +24,12 @@ namespace readyup::license {
 
 constexpr const char* kKeySetting = "readyup_license_key";
 constexpr const char* kShowSetting = "readyup_show_license";
+constexpr const char* kLeaseSetting = "readyup_license_lease";
+constexpr const char* kStateSetting = "readyup_license_state";
+
+// Empty while matches may be loaded; otherwise why a new match is refused (a paid license that
+// has stopped). Any thread.
+std::string StoppedMessage();
 
 // The license answer install.sh records (docs/INSTALL.md "License"): `readyup_license_accepted
 // "noncommercial"|"commercial"` and `readyup_license_accepted_at "<ISO time>"` in

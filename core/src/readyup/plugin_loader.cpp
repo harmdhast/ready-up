@@ -70,7 +70,7 @@ struct Instance {
   std::string mapCopy;  // current_map's return value (game thread)
 };
 
-enum class RegKind { Chat, Console, Tick, Event, GameEvent, LogLine, RuSub, Frame };
+enum class RegKind { Chat, Console, Tick, Event, GameEvent, LogLine, RuSub, Frame, ClientFilter };
 
 struct Reg {
   ru_handle id = 0;
@@ -330,6 +330,10 @@ int ApiServerCommand(ru_plugin* self, const char* cmd) {
 
 int ApiChatAll(ru_plugin* self, const char* msg, uint32_t flags) {
   if (!GameThreadCaller(self, "chat_all") || !msg || !*msg) return 0;
+  if (flags & RU_CHAT_IMPORTANT) {
+    SendImportantToChat(msg);
+    return 1;
+  }
   if (flags & RU_CHAT_RAW) SendRawToChat(msg);
   else SendToChat(msg);
   return 1;
@@ -393,6 +397,22 @@ ru_handle ApiRegisterChat(ru_plugin* self, const char* name, ru_command_fn fn, v
 
 ru_handle ApiRegisterChatEx(ru_plugin* self, const char* name, uint32_t flags, ru_command_fn fn, void* user) {
   return RegisterChat(self, name, flags, fn, user);
+}
+
+ru_handle ApiFilterClientCommand(ru_plugin* self, const char* name, ru_client_command_filter_fn fn, void* user) {
+  Instance* inst = GameThreadCaller(self, "filter_client_command");
+  if (!inst || !name || !fn) return 0;
+  const std::string n = Lower(name);
+  bool ok = !n.empty() && n.size() <= 48;
+  for (size_t i = 0; ok && i < n.size(); ++i) {
+    const unsigned char c = static_cast<unsigned char>(n[i]);
+    ok = std::islower(c) != 0 || std::isdigit(c) != 0 || c == '_';
+  }
+  if (!ok || n == "say" || n == "say_team" || n == "ru") {
+    Print("plugin[%s]: client command filter \"%s\" refused (invalid or reserved)\n", self->name, name);
+    return 0;
+  }
+  return AddReg(inst, RegKind::ClientFilter, n, 0, reinterpret_cast<void*>(fn), user, 0);
 }
 
 ru_handle RegisterConsole(ru_plugin* self, const char* name, uint32_t flags, ru_command_fn fn, void* user) {
@@ -1049,6 +1069,7 @@ bool LoadNow(const std::string& name, std::string* err, bool checkNeeds = true) 
   // v1.2 (feature_state is engine-facing: plugin_engine_api.cpp)
   a.log_untagged = &ApiLogUntagged;
   a.register_chat_command_ex = &ApiRegisterChatEx;
+  a.filter_client_command = &ApiFilterClientCommand;
   a.register_console_command_ex = &ApiRegisterConsoleEx;
   a.register_ru_subcommand = &ApiRegisterRuSub;
   a.on_frame = &ApiOnFrame;
@@ -1344,6 +1365,33 @@ bool TryDispatchChat(uint64_t steamid64, const std::string& playerName, const st
   c.text = text;
   std::lock_guard<std::mutex> lk(g_mu);
   return QueueCommandLocked(RegKind::Chat, Lower(parts[0]), std::move(c));
+}
+
+bool FilterClientCommand(int slot, uint64_t steamid64, const std::vector<std::string>& argv) {
+  if (argv.empty()) return false;
+  const std::string cmd = Lower(argv[0]);
+  struct Hit {
+    ru_client_command_filter_fn fn;
+    void* user;
+  };
+  std::vector<Hit> hits;
+  {
+    std::lock_guard<std::mutex> lk(g_mu);
+    for (const auto& r : g_regs) {
+      if (r.kind != RegKind::ClientFilter || r.name != cmd) continue;
+      const Instance* inst = FindLiveByIdLocked(r.owner);
+      if (!inst || inst->handle.unloading.load()) continue;
+      hits.push_back({reinterpret_cast<ru_client_command_filter_fn>(r.fn), r.user});
+    }
+  }
+  if (hits.empty()) return false;
+  std::vector<const char*> args;
+  args.reserve(argv.size());
+  for (const auto& a : argv) args.push_back(a.c_str());
+  for (const auto& h : hits) {
+    if (h.fn(h.user, slot, steamid64, cmd.c_str(), static_cast<int>(args.size()), args.data()) == 1) return true;
+  }
+  return false;
 }
 
 bool ChatCommandOwned(const std::string& token, uint32_t* flags) {

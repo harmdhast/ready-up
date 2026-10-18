@@ -23,6 +23,7 @@
 #include "readyup/knife_tracker.h"
 #include "readyup/logging.h"
 #include "readyup/match_rules.h"
+#include "readyup/fleet_bridge.h"
 #include "readyup/match_settings.h"
 #include "readyup/match_state.h"
 #include "readyup/pause_state.h"
@@ -32,12 +33,14 @@
 #include "readyup/players.h"
 #include "readyup/round_restore.h"
 #include "readyup/simulation.h"
+#include "readyup/team_lock.h"
 #include "readyup/status_snapshot.h"
 #include "readyup/weapon_cleanup.h"
 #include "readyup/webhook.h"
 #include "readyup/wingman.h"
 #include "readyup/host.h"
 #include "readyup/practice_iface.h"
+#include "readyup/whitelist_iface.h"
 
 #include <atomic>
 #include <chrono>
@@ -58,6 +61,14 @@ bool PracticeDryRun() {
   if (!a) return false;
   const auto* p = static_cast<const ru_practice_v1*>(a->get_interface(a->self, RU_PRACTICE_IFACE_NAME, 1));
   return p && RU_API_HAS(p, dry_run) && p->dry_run && p->dry_run() == 1;
+}
+// readyup.whitelist.v1 is_guest: a player another plugin lets in (tv.so's casters,
+// docs/design/tv-plugin.md). They join as spectators, like the match's own `spectators`.
+bool WhitelistGuest(uint64_t steamid64) {
+  const ru_api* a = readyup::host::Api();
+  if (!a || steamid64 == 0) return false;
+  const auto* w = static_cast<const ru_whitelist_v1*>(a->get_interface(a->self, RU_WHITELIST_IFACE_NAME, 1));
+  return w && RU_API_HAS(w, is_guest) && w->is_guest && w->is_guest(steamid64) == 1;
 }
 }  // namespace
 
@@ -246,6 +257,7 @@ static std::string KnifeWinnerNameLocked(const State& st, const WebhookMatchCont
 
 // Forward declarations (defined later in this file).
 static void ApplyWarmupRulesLocked(State& st);
+static void AppendTeamNameCmds(std::vector<std::string>* cmds, bool followSides = false);
 static bool AllRosterReadyAndConnectedLocked(State& st, const WebhookMatchContext& ctx);
 static void ApplyMatchCvarsLocked(const WebhookMatchContext& ctx, bool followSides = false);
 static void FinishMapLocked(State& st, const WebhookMatchContext& ctx, int map_number, const std::string& map,
@@ -412,8 +424,28 @@ static void MaybeAutoPickKnifeSideLocked(State& st) {
   (void)ApplyKnifeSideChoiceLocked(st, ctx, mapNumber, "stay", /*pickerSteamid64=*/0, /*pickerName=*/"timeout");
 }
 
+// Team1's side right now: the map's start side, flipped by every side swap so far (half time,
+// overtime). The same rule as simulation.cpp's, which is private to that file.
+static bool Team1IsCtNow(const WebhookMatchContext& ctx) {
+  const int mapNumber = std::max(1, MatchStateGet().map_number);
+  bool team1Ct = true;
+  if (static_cast<size_t>(mapNumber) <= ctx.map_sides.size()) {
+    team1Ct = ctx.map_sides[static_cast<size_t>(mapNumber - 1)] != "team2_ct";
+  }
+  if (MatchEventsSnapshot().swapCount % 2 != 0) team1Ct = !team1Ct;
+  return team1Ct;
+}
+
+// Moves tried per player and target while their cached team stays the same (team_lock.h).
+// Guarded by the state lock MaybeForceRosterTeamsLocked runs under.
+static MoveRetryCap g_moveCap(3);
+
 static void MaybeForceRosterTeamsLocked(State& st) {
-  if (st.mode != ReadyUpMode::MatchWarmup && st.mode != ReadyUpMode::MatchKnife) return;
+  // Live too: a roster player who switched team mid-map (2026-10-12, a BO3's
+  // second map) goes back. Switching team already killed them, so moving
+  // them back costs nothing more; someone on their side is never touched.
+  const bool live = st.mode == ReadyUpMode::MatchLive;
+  if (st.mode != ReadyUpMode::MatchWarmup && st.mode != ReadyUpMode::MatchKnife && !live) return;
   auto ctxOpt = WebhookGetMatchContext();
   if (!ctxOpt) return;
   const auto& ctx = *ctxOpt;
@@ -426,7 +458,8 @@ static void MaybeForceRosterTeamsLocked(State& st) {
 
   // The map's start side (knife maps: team1 = CT until decided), flipped by the swap count: a
   // resume warmup is on the resumed round's sides. The count is read lock-free (match_events.h).
-  const bool team1IsCt = Team1IsCtWithSwapCount(mapNum, MatchEventsSwapCountFor(mapNum));
+  // While live the sides may have swapped (half time, overtime): use the current ones.
+  const bool team1IsCt = live ? Team1IsCtNow(ctx) : Team1IsCtWithSwapCount(mapNum, MatchEventsSwapCountFor(mapNum));
   const auto now = std::chrono::steady_clock::now();
   const auto minInterval = std::chrono::milliseconds(900);
 
@@ -439,47 +472,61 @@ static void MaybeForceRosterTeamsLocked(State& st) {
     int join = 1;  // spectators
     if (ctx.spectators.find(h.steamid64) == ctx.spectators.end()) {
       auto it = ctx.roster_team.find(h.steamid64);
-      if (it == ctx.roster_team.end()) continue;  // not on the roster: the whitelist handles them
-      if (it->second == WebhookTeam::Team1) join = team1IsCt ? 3 : 2;       // CT : T
+      // Not on the roster (an admin the whitelist lets in, a player still in the server
+      // from the match before): spectators. An admin in a team played in someone else's
+      // match and bot fill counted them (2026-10-15).
+      if (it == ctx.roster_team.end()) join = 1;
+      else if (it->second == WebhookTeam::Team1) join = team1IsCt ? 3 : 2;  // CT : T
       else if (it->second == WebhookTeam::Team2) join = team1IsCt ? 2 : 3;  // T : CT
       else continue;
     }
-    if (h.team == join) continue;
-
+    // The cached team agrees: nothing to read or do (the common case, every tick).
+    if (h.team == join) {
+      g_moveCap.Forget(h.steamid64);
+      continue;
+    }
+    // It does not: throttled, then the engine's team (a byte of the controller) decides. A map
+    // load leaves the cache at 0 for a player who stays on their side (team_lock.h).
     auto lastIt = st.lastForceJoin.find(h.steamid64);
     if (lastIt != st.lastForceJoin.end() && (now - lastIt->second) < minInterval) continue;
+    st.lastForceJoin[h.steamid64] = now;
+    if (!TeamMoveNeeded(h.team, EngineTeamForSlot(h.slot), join)) {
+      g_moveCap.Forget(h.steamid64);
+      continue;
+    }
+    if (!g_moveCap.Allow(h.steamid64, join, h.team)) continue;
 
     // Not here: ChangeTeam fires the engine's team/death callbacks synchronously, and those
     // take Ready Up's locks, which this tick holds, so a move from inside it froze the game
     // thread (a live test hung on a map change). The move runs on the next frame, outside
     // every lock; the throttle keeps it to one per player per interval.
-    st.lastForceJoin[h.steamid64] = now;
     ScheduleOnGameThread(0.0, [slot = h.slot, steamid = h.steamid64, join, name = h.name]() {
       // The slot may have changed hands in between: only move the same player.
       bool same = false;
       for (const auto& x : ListHumans()) {
         if (x.slot == slot) {
-          same = x.steamid64 == steamid && x.team != join;
+          same = x.steamid64 == steamid && TeamMoveNeeded(x.team, EngineTeamForSlot(slot), join);
           break;
         }
       }
       if (!same || !ForceJoinTeamForSlot(slot, join)) return;
-      // ChangeTeam fires player_team synchronously, so the registry already shows a move that
-      // landed. One the engine refused (a full team) is retried every interval: report it once.
+      // ChangeTeam fires player_team synchronously, so the engine (or the registry) already shows a
+      // move that landed. One the engine refused (a full team) is retried every interval: report it once.
       static std::unordered_set<uint64_t> s_refusalReported;
       const char* side = join == 3 ? "CT" : join == 2 ? "T" : "spectators";
+      bool landed = EngineTeamForSlot(slot) == join;
       for (const auto& x : ListHumans()) {
-        if (x.slot != slot || x.steamid64 != steamid) continue;
-        if (x.team == join) {
-          s_refusalReported.erase(steamid);
-          Print("ready: moved %s to %s (their team's side this map)\n", name.c_str(), side);
-          // Only a move that landed: a refused one is retried every interval and must not restart
-          // the warmup round each time.
-          ModesOnHumanJoinedTeam(slot, steamid, join);
-        } else if (s_refusalReported.insert(steamid).second) {
-          Print("ready: could not move %s to %s (still trying)\n", name.c_str(), side);
-        }
-        return;
+        if (x.slot == slot && x.steamid64 == steamid && x.team == join) landed = true;
+      }
+      if (landed) {
+        s_refusalReported.erase(steamid);
+        Print(join == 1 ? "ready: moved %s to %s (not on this match's roster)\n" : "ready: moved %s to %s (their team's side this map)\n",
+              name.c_str(), side);
+        // Only a move that landed: a refused one is retried every interval and must not restart
+        // the warmup round each time.
+        ModesOnHumanJoinedTeam(slot, steamid, join);
+      } else if (s_refusalReported.insert(steamid).second) {
+        Print("ready: could not move %s to %s (still trying)\n", name.c_str(), side);
       }
     });
   }
@@ -596,18 +643,27 @@ static void MaybeShowWarmupUiLocked(State& st) {
     for (const auto& s : ListSlotIdentities()) {
       if (s.steamid64 != 0) connected.insert(s.steamid64);
     }
-    int teamRoster[2] = {0, 0}, teamReady[2] = {0, 0};
+    int teamRoster[2] = {0, 0}, teamReady[2] = {0, 0}, teamPresent[2] = {0, 0}, teamPresentReady[2] = {0, 0};
     for (const auto& kv : ctx->roster_team) {
       const uint64_t sid = kv.first;
       if (sid == 0) continue;
       const int t = kv.second == WebhookTeam::Team2 ? 1 : 0;
       ++teamRoster[t];
-      if (connected.find(sid) != connected.end()) rosterConnected++;
+      const bool here = connected.find(sid) != connected.end();
+      if (here) {
+        rosterConnected++;
+        ++teamPresent[t];
+      }
       auto it = st.ready.find(sid);
-      if (it != st.ready.end() && it->second) ++teamReady[t];
+      if (it != st.ready.end() && it->second) {
+        ++teamReady[t];
+        if (here) ++teamPresentReady[t];
+      }
     }
     for (int t = 0; t < 2; ++t) {
-      const ReadyTally tally = TeamReadyTally(teamRoster[t], teamReady[t], ctx->players_per_team);
+      const ReadyTally tally = ctx->bot_fill
+                                   ? BotFillReadyTally(teamPresent[t], teamPresentReady[t])
+                                   : TeamReadyTally(teamRoster[t], teamReady[t], ctx->players_per_team);
       rosterTotal += tally.total;
       rosterReady += tally.ready;
     }
@@ -687,6 +743,7 @@ static void EnforceWhitelistLocked(State& st) {
     if (allowed.find(s.steamid64) != allowed.end()) continue;
     if (isAdmin(s.steamid64)) continue;
     if (CoachAllowedOnServer(s.steamid64)) continue;  // an admin made them a coach (coach.h)
+    if (WhitelistGuest(s.steamid64)) continue;        // a caster (tv.so via whitelist.so)
 
     auto it = st.lastKick.find(s.steamid64);
     if (it != st.lastKick.end() && (now - it->second) < minKickInterval) continue;
@@ -699,7 +756,29 @@ static void EnforceWhitelistLocked(State& st) {
   }
 }
 
-static bool AllRosterReadyAndConnectedLocked(State& st, const WebhookMatchContext& ctx) {
+// Bot fill's empty-server grace (BotFillEmptyMayGoLive). A new match starts it over: a match
+// loaded on a server that had been empty since the last one went live at once, before anyone
+// could join (2026-10-14).
+static bool g_botFillWasEmpty = false;
+static std::chrono::steady_clock::time_point g_botFillEmptySince;
+
+static bool GoLiveCheckLocked(State& st, const WebhookMatchContext& ctx, std::string* why) {
+  // Nobody goes live on the wrong side: a player who switched team and typed .ready before the
+  // team lock moved them back would start the match there. Wait for the lock (it moves them
+  // within a second; MaybeForceRosterTeamsLocked).
+  {
+    const bool team1Ct = Team1IsCtNow(ctx);
+    for (const auto& h : ListHumans()) {
+      auto it = ctx.roster_team.find(h.steamid64);
+      if (it == ctx.roster_team.end() || (h.team != 2 && h.team != 3)) continue;
+      const bool isTeam1 = it->second == WebhookTeam::Team1;
+      const int want = (isTeam1 == team1Ct) ? 3 : 2;
+      if (h.team != want) {
+        *why = h.name + " is on " + (h.team == 3 ? "CT" : "T") + " but their team plays " + (want == 3 ? "CT" : "T");
+        return false;
+      }
+    }
+  }
   // min_spectators_to_ready: that many of the match's spectators (casters) typed .ready.
   if (const int needSpec = EffectiveRules().min_spectators_to_ready; needSpec > 0) {
     int readySpec = 0;
@@ -707,7 +786,10 @@ static bool AllRosterReadyAndConnectedLocked(State& st, const WebhookMatchContex
       auto it = st.ready.find(sid);
       if (it != st.ready.end() && it->second) ++readySpec;
     }
-    if (!SpectatorsReadyToGoLive(needSpec, readySpec)) return false;
+    if (!SpectatorsReadyToGoLive(needSpec, readySpec)) {
+      *why = "spectators ready " + std::to_string(readySpec) + "/" + std::to_string(needSpec);
+      return false;
+    }
   }
   if (ctx.roster_team.empty()) return true;
 
@@ -735,10 +817,123 @@ static bool AllRosterReadyAndConnectedLocked(State& st, const WebhookMatchContex
     auto it = st.ready.find(sid);
     if (it != st.ready.end() && it->second) ++ready[t];
   }
+  // Bot fill with nobody connected yet: the match does not go live the moment
+  // it loads (2026-10-12: it went live before the humans joined). A
+  // bots-only match goes after BotFillEmptyGraceSeconds with nobody joining.
+  // The grace counts from when the server last became empty: a new map (the
+  // players reconnect after the change) or the last human leaving starts it
+  // over (2026-10-12: map 2 went live at once, timed from the match load).
+  // A failover resume restores a round: every roster player back first, then the normal ready-up
+  // below (.r from everyone present). Live as soon as anyone was back skipped both, and a match
+  // came back live with a player missing and nobody ready (2026-10-15). An admin start is the
+  // way on without someone.
+  if (fleet_bridge::ResumeWaiting()) {
+    const ResumeHeadcount head = ResumeCount(roster, present, ctx.players_per_team);
+    if (!ResumeMayGoLive(head.needed, head.back)) {
+      *why = "failover resume: " + std::to_string(head.back) + "/" + std::to_string(head.needed) + " players back";
+      return false;
+    }
+  }
+  // Bot fill with nobody on the server yet: wait before the bots play alone. A match with players on
+  // its roster gives them kBotFillRosterGraceSeconds to join (60 s started a match before its player
+  // got in, 2026-10-14; waiting forever never started a bot team's match whose roster holds a
+  // placeholder player, 2026-10-15); a match with nobody rostered goes after the short grace.
+  bool& wasEmpty = g_botFillWasEmpty;
+  std::chrono::steady_clock::time_point& emptySince = g_botFillEmptySince;
+  if (ctx.bot_fill && present[0] + present[1] == 0) {
+    const auto nowTp = std::chrono::steady_clock::now();
+    if (!wasEmpty) {
+      wasEmpty = true;
+      emptySince = nowTp;
+    }
+    const double waited = std::chrono::duration<double>(nowTp - emptySince).count();
+    const bool rostered = roster[0] + roster[1] > 0;
+    if (rostered ? waited < kBotFillRosterGraceSeconds : !BotFillEmptyMayGoLive(waited)) {
+      *why = rostered ? "bot fill: waiting for the rostered players to join" : "bot fill: waiting for a human to join";
+      return false;
+    }
+  } else {
+    wasEmpty = false;
+  }
+  // Bot fill: both sides need someone in game (a bot or a human). Going live on an empty server
+  // left the map in warmup: CS2 starts a warmup when the first players join an empty server, so
+  // the bots that joined after the go-live put it back in warmup while Ready Up counted it live
+  // (2026-10-13: map 2 of a bots-only Bo3 stuck in warmup for 20 minutes).
+  if (ctx.bot_fill) {
+    int ct = 0, t = 0;
+    for (const auto& h : ListHumans()) {
+      if (h.team == 3) ++ct;
+      else if (h.team == 2) ++t;
+    }
+    for (const auto& b : ListBots()) {
+      if (b.team == 3) ++ct;
+      else if (b.team == 2) ++t;
+    }
+    if (ct == 0 || t == 0) {
+      *why = "bot fill: waiting for players or bots on both sides (CT " + std::to_string(ct) + ", T " +
+             std::to_string(t) + ")";
+      return false;
+    }
+  }
+  // Bot fill: a rostered player who has not joined yet is waited for (kBotFillRosterGraceSeconds
+  // from when the team was first seen short), not filled with a bot: a teammate's .r started a
+  // shuffle match while the other player was still connecting (2026-10-15). Past the grace a bot
+  // plays for the no-show; an admin start is the way on sooner.
+  static std::chrono::steady_clock::time_point shortSince[2];
+  static bool shortSeen[2] = {false, false};
+  if (ctx.bot_fill && wasEmpty) shortSeen[0] = shortSeen[1] = false;
   for (int t = 0; t < 2; ++t) {
-    if (!TeamReadyToGoLive(roster[t], present[t], ready[t], minPlayers, ctx.players_per_team)) return false;
+    // Bot fill: bots are always ready, so only the connected humans hold a team up.
+    if (ctx.bot_fill) {
+      if (present[t] < roster[t]) {
+        const auto nowTp = std::chrono::steady_clock::now();
+        if (!shortSeen[t]) {
+          shortSeen[t] = true;
+          shortSince[t] = nowTp;
+        }
+        const double waited = std::chrono::duration<double>(nowTp - shortSince[t]).count();
+        if (waited < kBotFillRosterGraceSeconds) {
+          *why = std::string(t == 0 ? "team1" : "team2") + ": waiting for " +
+                 std::to_string(roster[t] - present[t]) + " rostered player(s) to join";
+          return false;
+        }
+      } else {
+        shortSeen[t] = false;
+      }
+      if (!BotFillTeamReady(present[t], ready[t])) {
+        *why = std::string(t == 0 ? "team1" : "team2") + ": " + std::to_string(ready[t]) + "/" +
+               std::to_string(present[t]) + " connected players ready";
+        return false;
+      }
+      continue;
+    }
+    if (!TeamReadyToGoLive(roster[t], present[t], ready[t], minPlayers, ctx.players_per_team)) {
+      *why = std::string(t == 0 ? "team1" : "team2") + ": " + std::to_string(ready[t]) + " ready, " +
+             std::to_string(present[t]) + " connected, " + std::to_string(roster[t]) + " on the roster";
+      return false;
+    }
   }
   return true;
+}
+
+// Why the match is not going live, said once per change in the console without debug=1, once
+// anybody typed .ready (before that, waiting is the normal state and would only be noise).
+static bool AllRosterReadyAndConnectedLocked(State& st, const WebhookMatchContext& ctx) {
+  static std::string lastWhy;
+  std::string why;
+  const bool go = GoLiveCheckLocked(st, ctx, &why);
+  bool anyReady = false;
+  for (const auto& kv : st.ready) anyReady = anyReady || kv.second;
+  if (go) {
+    if (!lastWhy.empty()) Print("match: everyone is ready; going live\n");
+    lastWhy.clear();
+  } else if (anyReady && why != lastWhy) {
+    Print("match: not going live yet: %s\n", why.empty() ? "waiting" : why.c_str());
+    lastWhy = why;
+  } else if (!anyReady) {
+    lastWhy.clear();
+  }
+  return go;
 }
 
 static void ApplyWarmupRulesLocked(State& st) {
@@ -752,8 +947,14 @@ static void ApplyWarmupRulesLocked(State& st) {
     for (const char* c : off) {
       if (EnqueueServerCommand(c)) any = true;
     }
-    // No death drops even with an older warmup.cfg that lacks them (weapon_cleanup.h).
+    // No death drops even with an older warmup.cfg that lacks them (weapon_cleanup.h), and
+    // no team damage even with an older warmup.cfg or a game mode cfg that turns it on.
     EnqueueAfterCfg(std::vector<std::string>(std::begin(kWarmupNoDropCmds), std::end(kWarmupNoDropCmds)));
+    EnqueueAfterCfg({"mp_friendlyfire 0"});
+    // The scoreboard shows the teams' names from warmup on, not only once live.
+    std::vector<std::string> names;
+    AppendTeamNameCmds(&names);
+    EnqueueAfterCfg(std::move(names));
     if (any) {
       st.warmupRulesApplied = true;
       DebugLine("modes: warmup cfg executed (CS2 warmup off)");
@@ -887,7 +1088,7 @@ static bool IsSafeConvarValue(const std::string& s) {
 // at halftime); after a knife `.switch` (mp_swapteams) the map side, and so the names, change.
 // Scrims keep CS2's default names. Queued with the match cvars (after the cfg).
 // followSides: a resume warmup, where the CT / T names follow the current sides (swap count).
-static void AppendTeamNameCmds(std::vector<std::string>* cmds, bool followSides = false) {
+static void AppendTeamNameCmds(std::vector<std::string>* cmds, bool followSides) {
   const auto ctx = WebhookGetMatchContext();  // fresh: the knife pick just updated map_sides
   std::string n1, n2, f1, f2;
   if (ctx && ctx->slug != "scrim") {
@@ -931,13 +1132,15 @@ static void ApplyMatchCvarsLocked(const WebhookMatchContext& ctx, bool followSid
   for (const auto& kv : ctx.cvars) {
     const std::string& key = kv.first;
     const std::string& val = kv.second;
+    // tv_password (and any other *password*): never in the log, not even at debug=1.
+    const bool secret = key.find("password") != std::string::npos;
     if (!IsSafeConvarKey(key) || !IsSafeConvarValue(val)) {
-      Debug("modes: skipped unsafe cvar key=\"%s\" val=\"%s\"\n", key.c_str(), val.c_str());
+      Debug("modes: skipped unsafe cvar key=\"%s\" val=\"%s\"\n", key.c_str(), secret ? "<hidden>" : val.c_str());
       continue;
     }
     const std::string cmd = key + " " + val;
     if (DebugEnabled()) {
-      Debug("modes: cvar: %s\n", cmd.c_str());
+      Debug("modes: cvar: %s\n", secret ? (key + " <hidden>").c_str() : cmd.c_str());
     }
     cmds.push_back(cmd);
   }
@@ -1216,15 +1419,31 @@ static bool JoinSpawnApplies(const State& st) {
   return st.mode == ReadyUpMode::MatchWarmup && !st.startTriggered && !st.recoveryGate;
 }
 
+// A level load (RU_EVENT_MAP_START): the gamemode cfg reset the cvars, so the mode's rules (warmup,
+// idle, practice) are applied again, also when the map is the same one as before.
+void ModesOnMapStart() {
+  auto& st = St();
+  std::lock_guard<std::mutex> lk(st.mu);
+  // A match loaded on the map the server already had reloads that map: same name, so the map-change
+  // check in Tick() never fired and the warmup ran on competitive defaults (no respawn, 15 s freeze
+  // time; 2026-10-14). Forgetting the map makes Tick() treat it as new.
+  st.lastSeenMap.clear();
+}
+
 // Restarts the match warmup round so everyone spawns. Debounced: a few joins (and a team-lock
 // move) land in the same restart.
 static void RestartWarmupRoundForJoiner() {
   static bool s_pending = false;
   static auto s_last = std::chrono::steady_clock::time_point{};
   const auto now = std::chrono::steady_clock::now();
-  if (s_pending || (now - s_last) < std::chrono::seconds(4)) return;
+  if (s_pending) return;  // the restart already queued spawns this player too
   s_pending = true;
-  ScheduleOnGameThread(1.5, []() {
+  // 1.5 s: lets a few joins (and a team-lock move) land in the same restart. A join
+  // just after a restart waits for the 4 s gap instead of being dropped: the second
+  // player of a 2v2 joined 2 s after the first and never spawned (2026-10-15).
+  const double sinceLast = std::chrono::duration<double>(now - s_last).count();
+  const double delay = std::max(1.5, 4.0 - sinceLast);
+  ScheduleOnGameThread(delay, []() {
     s_pending = false;
     s_last = std::chrono::steady_clock::now();
     {
@@ -1494,6 +1713,7 @@ void OnMatchLoaded() {
   st.lastUi.clear();
   st.warmupRulesApplied = false;
   st.startTriggered = false;
+  g_botFillWasEmpty = false;  // the empty-server grace counts from this match's load
   st.lifecycleMapNumber = 0;
   st.warmupEndedSent = false;
   st.goingLiveSent = false;
@@ -1525,7 +1745,13 @@ void OnMatchRoundStarted() {
   // round starts) should NOT automatically mark the match as live. Only transition
   // once Ready Up actually triggered going-live (startTriggered), or when warmup
   // gating is disabled.
-  if (st.warmupEnabled && !st.startTriggered) return;
+  if (st.warmupEnabled && !st.startTriggered) {
+    // Warmup has no team damage. The map's game mode cfg (wingman: competitive2v2) can run
+    // after warmup.cfg and turn friendly fire back on, so every warmup round says it again
+    // (2026-10-15: teammates hurt each other in a wingman warmup).
+    (void)EnqueueServerCommand("mp_friendlyfire 0");
+    return;
+  }
   // mp_restartgame 1 needs a second: a Round_Start inside that window belongs
   // to the round being replaced (e.g. the knife side-pick round), not to live.
   if (st.startTriggered && st.lastGateCmd.time_since_epoch().count() != 0 &&
@@ -1542,6 +1768,15 @@ void OnMatchRoundStarted() {
   match_recovery::NoteProgress();
   WebhookSetHeartbeatStatus("live");
   SendToChat("Ready Up: LIVE! Good luck, have fun.");
+  if (const auto ctx = WebhookGetMatchContext()) {
+    const int mapNo = std::max(1, MatchStateGet().map_number);
+    const std::string mapName = mapNo - 1 < static_cast<int>(ctx->maplist.size()) ? ctx->maplist[mapNo - 1] : "";
+    for (const auto& line : GoLiveRulesLines(mapNo, std::max(1, ctx->num_maps), mapName, ctx->maxRounds,
+                                              ctx->overtime_enabled, ctx->overtimeSegments, ctx->maxOvertimes,
+                                              ctx->damageTiebreakEnabled)) {
+      SendToChat(line.c_str());
+    }
+  }
   GoLiveCardArm("go-live round start", /*restartPending=*/false);  // "LIVE · GO GO GO" + commands
 
   // Emit warmup/live lifecycle events once per map transition.
@@ -1644,6 +1879,31 @@ bool RestartMatch() {
   // Best-effort reset scoreboard state.
   (void)EnqueueServerCommand("mp_restartgame 1");
   return true;
+}
+
+bool TeamLockRefusesJoin(uint64_t steamid64, int team) {
+  if (steamid64 == 0) return false;
+  auto& st = St();
+  std::lock_guard<std::mutex> lk(st.mu);
+  if (st.mode != ReadyUpMode::MatchWarmup && st.mode != ReadyUpMode::MatchKnife &&
+      st.mode != ReadyUpMode::MatchLive) {
+    return false;
+  }
+  const auto ctx = WebhookGetMatchContext();
+  if (!ctx || ctx->slug == "scrim") return false;
+  if (ctx->spectators.count(steamid64)) return team != 1;  // casters stay spectators
+  if (!ctx->roster_team.count(steamid64) && WhitelistGuest(steamid64)) return team != 1;  // tv.so casters too
+  auto it = ctx->roster_team.find(steamid64);
+  if (it == ctx->roster_team.end()) return false;  // not on the roster: the whitelist handles them
+  const bool team1Ct = st.mode == ReadyUpMode::MatchLive ? Team1IsCtNow(*ctx) : [&] {
+    const int mapNum = std::max(1, MatchStateGet().map_number);
+    if (static_cast<size_t>(mapNum) <= ctx->map_sides.size()) {
+      return ctx->map_sides[static_cast<size_t>(mapNum - 1)] != "team2_ct";
+    }
+    return true;
+  }();
+  const int want = ((it->second == WebhookTeam::Team1) == team1Ct) ? 3 : 2;
+  return team != want;
 }
 
 bool EndMatchResetServer() {
@@ -1915,6 +2175,20 @@ static void FinishMapLocked(State& st, const WebhookMatchContext& ctx, int map_n
   in.seriesOver = seriesOver;
   in.nextMap = nextMap;
   if (forfeit) in.seriesWinner = winner;
+  // Tied after the overtimes and still won: the damage tiebreak decided it. Say so, with the numbers.
+  const bool won = std::strcmp(winner, "team1") == 0 || std::strcmp(winner, "team2") == 0;
+  if (!forfeit && won && in.team1Score == in.team2Score) {
+    const auto dmg = GetRosterTeamDamageTotals();
+    in.decidedByDamage = true;
+    in.team1Damage = dmg.first;
+    in.team2Damage = dmg.second;
+    const std::string winnerName = std::strcmp(winner, "team1") == 0 ? ctx.team1_name : ctx.team2_name;
+    SendImportantToChat(("Ready Up: " + std::to_string(in.team1Score) + "-" + std::to_string(in.team2Score) +
+                " after the overtimes, so total damage decides: " + winnerName + " wins the map (" +
+                ctx.team1_name + " " + std::to_string(dmg.first) + " - " + std::to_string(dmg.second) + " " +
+                ctx.team2_name + ").")
+                   .c_str());
+  }
   (void)MatchEndOnMapComplete(in);
   match_recovery::NoteProgress();  // map_over + the series score (crash recovery)
 }
@@ -2404,7 +2678,10 @@ void OnNativeWarmupStarted(const char* source) {
                          m == ReadyUpMode::MatchKnife);
   // Practice has no warmup either. After a map change or a restart, CS2 starts its warmup after
   // prac.cfg (and its mp_warmup_end) already ran, so practice sat in CS2's warmup until `.prac`.
-  if (!emulated && m != ReadyUpMode::Practice) {
+  // A live map has no warmup either: CS2 starts one when players join an empty server, which put a
+  // map that went live before its bots joined back in warmup for good (2026-10-13). End it.
+  const bool live = m == ReadyUpMode::MatchLive;
+  if (!emulated && !live && m != ReadyUpMode::Practice) {
     Debug("warmup: CS2 warmup started (%s) in mode=%s; left alone\n", source ? source : "?", ModeToString(m));
     return;
   }
@@ -2420,8 +2697,20 @@ void OnNativeWarmupStarted(const char* source) {
     if (EnqueueServerCommand(c)) any = true;
   }
   if (any) st.lastNativeWarmupEnd = now;
+  // CS2's warmup starting (bots or the first player joining) and ending puts competitive defaults
+  // back: no respawn, no buy anywhere, rounds end (2026-10-14, a match warmup that played like a
+  // normal match). Ready Up's warmup rules go on again once the end has gone through.
+  if (m == ReadyUpMode::MatchWarmup || m == ReadyUpMode::ScrimWarmup) {
+    ScheduleOnGameThread(1.0, []() {
+      auto& st2 = St();
+      std::lock_guard<std::mutex> lk2(st2.mu);
+      if (st2.mode == ReadyUpMode::MatchWarmup || st2.mode == ReadyUpMode::ScrimWarmup) st2.warmupRulesApplied = false;
+    });
+  }
   Print("warmup: CS2 warmup started (%s) in mode=%s; ending it (%s)%s\n", source ? source : "?", ModeToString(m),
-        m == ReadyUpMode::Practice ? "practice has no warmup" : "Ready Up emulates warmup",
+        m == ReadyUpMode::Practice ? "practice has no warmup"
+        : live                     ? "the map is live"
+                                   : "Ready Up emulates warmup",
         any ? "" : " - command buffer not ready");
 }
 

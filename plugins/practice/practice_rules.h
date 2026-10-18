@@ -45,4 +45,9 @@ bool SlotEntryUsable(SlotEngineState state);
 // The `.help` line while practice is on.
 const char* HelpLine();
 
+// A home map setting (practice.set {home_cvars}): "sv_<name> <number>" or "mp_<name> <number>",
+// nothing else (they go straight to the console). At most kMaxHomeCvars of them.
+bool ValidHomeCvar(const std::string& line);
+constexpr int kMaxHomeCvars = 24;
+
 }  // namespace practice

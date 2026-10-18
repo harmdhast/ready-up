@@ -5,6 +5,7 @@
 
 #include "readyup/admin_check.h"
 #include "readyup/backup_files.h"
+#include "readyup/chat_forward.h"
 #include "readyup/cs2_update_check.h"
 #include "readyup/cs2_version.h"
 #include "readyup/demo_recorder.h"
@@ -45,6 +46,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <filesystem>
@@ -330,9 +332,9 @@ void KickHumans(const std::string& message, bool (*keep)(uint64_t)) {
   }
 }
 
-bool KeepOnHandOver(uint64_t sid) {
-  return fs::InAssignedMatch(g_config, sid) || IsReadyUpAdmin(sid);
-}
+// Only the new match's own players stay. Admins too are kicked: an admin left in the
+// server played in the next match and disrupted it (2026-10-15); they rejoin as spectators.
+bool KeepOnHandOver(uint64_t sid) { return fs::InAssignedMatch(g_config, sid); }
 
 void SetPassword(const std::string& pw) {
   // ValidPassword() already refused quotes / `;` / spaces.
@@ -499,7 +501,7 @@ void Overlay(Json* st, const Json& live) {
       const Json* p = lp ? lp->Find(kv.first) : nullptr;
       if (!p) continue;
       Json& dst = players[kv.first];
-      for (const char* k : {"connected", "ready"}) {
+      for (const char* k : {"connected", "ready", "ping", "connected_at"}) {
         if (const Json* v = p->Find(k)) dst[k] = *v;
       }
       if (Str(dst, "name").empty() && !Str(*p, "name").empty()) dst["name"] = Str(*p, "name");
@@ -526,6 +528,7 @@ void Overlay(Json* st, const Json& live) {
     }
   }
   if (const Json* r = live.Find("round")) s["round"] = *r;
+  if (const Json* g = live.Find("game")) s["game"] = *g;
   // Ruleset + effective rules (ruleset.h): what the server enforces, "differs from Valve".
   for (const char* k : {"ruleset", "effective_rules"}) {
     if (const Json* v = live.Find(k)) s[k] = *v;
@@ -576,8 +579,11 @@ Json BuildState() {
   const PauseSnapshot ps = PauseStateGet();
   if (ps.paused && CtxIsOurs(ctx)) {
     g_pauseSeen = true;
-    // The protocol's pause types have no "restore" (DoRestoreNow): the platform sees technical.
-    st["pause"]["type"] = ps.type.empty() ? std::string("admin") : ps.type == "restore" ? std::string("technical") : ps.type;
+    // The protocol's pause types have no "restore" (DoRestoreNow) or "engine" (an engine pause
+    // Ready Up did not start, match_features.cpp): the platform sees technical, by "server".
+    st["pause"]["type"] = ps.type.empty()                                ? std::string("admin")
+                          : ps.type == "restore" || ps.type == "engine" ? std::string("technical")
+                                                                         : ps.type;
     if (!ps.by.empty()) st["pause"]["by"] = ps.by;
   } else {
     g_pauseSeen = false;
@@ -716,8 +722,35 @@ void Derive(const Json& prev, const Json& cur, std::vector<Ev>* out) {
   }
 }
 
+// Events that say nothing about MatchState: they bump live_rev (the protocol wants a rev on
+// every event.*) but carry no state diff, so a chat line does not drag the state with it.
+bool RevOnlyEvent(const std::string& type) { return type == "chat"; }
+
 void EmitAll(const Json& st, std::vector<Ev>& evs) {
   const long long epoch = g_asg.epoch;
+  if (!evs.empty() && g_stream.HasState()) {
+    const long long curMap = Int(Copy(st.Find("series")), "current_map", 1);
+    const long long curRound = Int(Copy(st.Find("round")), "number", 0);
+    for (auto it = evs.begin(); it != evs.end();) {
+      if (!RevOnlyEvent(it->type)) {
+        ++it;
+        continue;
+      }
+      Json patch;
+      long long rev = 0;
+      if (!g_stream.BumpRevOnly(&patch, &rev)) break;
+      Json p = Json::Object();
+      p["match_id"] = g_asg.match_id;
+      p["map_number"] = it->mapNumber > 0 ? static_cast<long long>(it->mapNumber) : std::max<long long>(1, curMap);
+      const long long round = it->round >= 0 ? it->round : curRound;
+      if (round > 0) p["round"] = round;
+      p["rev"] = rev;
+      p["patch"] = std::move(patch);
+      p["data"] = std::move(it->data);
+      Send("event." + it->type, p, epoch, true);
+      it = evs.erase(it);
+    }
+  }
   if (evs.empty()) {
     Json patch;
     long long rev = 0;
@@ -998,6 +1031,15 @@ void RunDeferredRestore() {
   if (MatchFeaturesRoundOver()) return;
   DeferredRestore d = std::move(g_deferredRestore);
   g_deferredRestore = DeferredRestore{};
+  // A local crash-recovery restore that waited for this round, while the platform's failover
+  // resume already restored the match: running it would restore the round a second time, rounds
+  // after the resume. That moved players to the wrong sides and ended a series at a wrong score
+  // (t3-shuffle-r4-m4, NTLAN 2026-10-16).
+  if (d.reason == "recovery" && (g_resumeActive || g_asg.active)) {
+    Print("fleet: dropped the local recovery restore of map %d round %d; the platform resumed the match\n",
+          d.mapNumber, d.round);
+    return;
+  }
   Print("fleet: next round started; running the restore of map %d round %d\n", d.mapNumber, d.round);
   (void)DoRestoreNow(d.mapNumber, d.round, d.file, d.sha, d.by, d.reason, d.extra, d.scoreT1, d.scoreT2,
                      d.team1Side);
@@ -1118,7 +1160,10 @@ void BeginLoad() {
   ScrimSetAutoEnabled(false);
   // Map 1, or the map a failover resumes (workshop maps load with host_workshop_map).
   const int first = g_resumeActive ? g_resume.map_number : 1;
-  ApplyLoadedMatch(*ctx, matJson, first);
+  if (!ApplyLoadedMatch(*ctx, matJson, first)) {
+    Print("fleet: match %s not loaded: %s\n", g_asg.match_id.c_str(), LicenseStoppedReason().c_str());
+    return;
+  }
   SetFullRosterGate(g_resumeActive);  // after the load, which clears it
   if (g_resumeActive && g_resume.round >= 1 && !g_resume.team1_side.empty()) {
     // The warmup, bot fill and the restore follow the resumed round's sides.
@@ -1430,12 +1475,20 @@ void OnUnassign(const ru_fleet_msg* m) {
   const std::string reason = Str(p, "reason", "ended");
   const std::string kickMsg = Str(p, "kick_message");
   const auto ctx = WebhookGetMatchContext();
-  if (CtxIsOurs(ctx)) {
+  // The series just ended and its end card is up (match_end.cpp's kick-then-reset is pending):
+  // that plan resets the server once the players have seen the result. Resetting here put the
+  // players in a pickup warmup ("YOU ARE NOT READY") a second after the last round (2026-10-15).
+  const bool endCardUp =
+      CtxIsOurs(ctx) && GetMode() == ReadyUpMode::Postgame && MatchEndPending() && kickMsg.empty();
+  if (CtxIsOurs(ctx) && !endCardUp) {
     WebhookClearMatchContext();
     (void)EndMatchResetServer();
   }
+  if (endCardUp) Print("fleet: %s unassigned; the end card stays until the series-end kick\n", mid.c_str());
   SetPassword("");
-  if (!kickMsg.empty()) {
+  if (endCardUp) {
+    // match_end.cpp kicks and resets on its own schedule.
+  } else if (!kickMsg.empty()) {
     KickHumans(kickMsg, nullptr);
   } else if (!ListHumans().empty()) {
     int noDemo = 5, d1 = 0, d2 = 0;
@@ -1468,6 +1521,7 @@ Result CmdPause(const Json& args, const std::string& by) {
 
 Result CmdUnpause(const std::string& by) {
   if (!PauseStateGet().paused) return Rejected("not_paused", "the match is not paused");
+  MatchFeaturesAdminUnpausing();
   if (!EnqueueServerCommand("mp_unpause_match")) return Failed("engine", "mp_unpause_match unavailable");
   PauseStateOnUnpaused();
   g_unpauseBy = by;
@@ -1482,15 +1536,24 @@ Result CmdForceReady(const Json& args) {
   if (!ctx) return Rejected("bad_phase", "no match loaded");
   const std::string team = Str(args, "team");
   if (!team.empty() && team != "team1" && team != "team2") return Rejected("bad_args", "team must be team1 or team2");
+  // One player (the admin match page's per-player "Mark ready"), else a team or everyone.
+  const std::string one = Str(args, "steamid64");
+  const uint64_t oneId = one.empty() ? 0 : std::strtoull(one.c_str(), nullptr, 10);
+  if (!one.empty() && oneId == 0) return Rejected("bad_args", "steamid64 must be a SteamID64");
   int n = 0;
+  bool found = false;
   for (const auto& h : ListHumans()) {
+    if (oneId != 0 && h.steamid64 != oneId) continue;
     const auto it = ctx->roster_team.find(h.steamid64);
     if (it == ctx->roster_team.end()) continue;
     if (!team.empty() && (it->second == WebhookTeam::Team1 ? "team1" : "team2") != team) continue;
+    found = true;
     if (!SetReady(h.steamid64, true)) ++n;
   }
+  if (oneId != 0 && !found) return Rejected("not_connected", "no connected roster player " + one);
   ScrimNoteReadyChanged();
-  SendToChat("Ready Up: players readied by a tournament admin.");
+  SendToChat(oneId != 0 ? "Ready Up: a player was readied by a tournament admin."
+                        : "Ready Up: players readied by a tournament admin.");
   Result r = Ok();
   r.message = std::to_string(n) + " player(s) set ready";
   return r;
@@ -1951,7 +2014,13 @@ void OnCmd(const ru_fleet_msg* m) {
   } else if (name == "start") {
     // args.force: also under the valve ruleset without GOTV (esports.h).
     const bool force = Bool(args, "force");
-    if (!IsWarmupMode()) r = Rejected("bad_phase", "start works in warmup only");
+    if (GetMode() == ReadyUpMode::MatchLive) {
+      // Live, but CS2 can still be in its own warmup (it starts one when players join an empty
+      // server): the admin's "End warmup" ends it (2026-10-13: a map sat in warmup for 20 min).
+      const bool queued = EnqueueServerCommand("mp_warmup_pausetimer 0") && EnqueueServerCommand("mp_warmup_end");
+      r = queued ? Ok() : Failed("engine", "could not queue mp_warmup_end");
+      Print("fleet: start on a live map: CS2 warmup ended (%s)\n", queued ? "queued" : "not queued");
+    } else if (!IsWarmupMode()) r = Rejected("bad_phase", "start works in warmup only");
     else if (ForceStartMatch(force)) r = Ok();
     else if (!force && LiveCfgRequired() && EsportsGotvState() == GotvState::Down)
       r = Rejected("gotv_off", "GOTV is off on this map (valve ruleset): reload the map, or start with {\"force\": true}");
@@ -2283,9 +2352,30 @@ void OnCoreEvent(const ru_event* e) {
   }
 }
 
+// Player chat (chat_forward.h): every human line that is not a command, as `event.chat`, at most
+// 5 lines per player per 5 s so a spammer cannot flood the link.
+static chat_forward::RateLimiter g_chatLimit(5, 5.0);
+
+static void ForwardChat(const char* line) {
+  if (!g_asg.active || !signals::Enabled()) return;
+  if (!std::strstr(line, "\" say \"") && !std::strstr(line, "\" say_team \"")) return;
+  std::vector<chat_forward::KnownHuman> humans;
+  for (const auto& h : ListHumans()) humans.push_back({h.userid, h.steamid64});
+  const auto c = chat_forward::ParseChatLogLine(line, humans);
+  if (!c || IsDevBotId(c->steamid64) || chat_forward::IsCommand(c->message)) return;
+  Json d = chat_forward::EventData(*c, fs::TeamOf(g_config, c->steamid64), UnixMs());
+  if (d.Find("message")->AsString().empty()) return;
+  if (!g_chatLimit.Allow(c->steamid64, g_now)) {
+    Debug("fleet: chat from %llu over the rate limit; not forwarded\n", static_cast<unsigned long long>(c->steamid64));
+    return;
+  }
+  signals::Emit("chat", std::move(d));
+}
+
 void OnLogLine(const char* line) {
   if (!line) return;
   g_logRelay.Push(line, g_now);
+  ForwardChat(line);
   if (g_execs.empty()) return;
   for (auto& x : g_execs) {
     if (x.output.size() >= kExecOutputMax) continue;
@@ -2333,6 +2423,7 @@ void Tick(double now) {
         ++it;
         continue;
       }
+      // Everyone, admins included: the server is about to take another match.
       KickHumans(it->message, nullptr);
       it = g_kicks.erase(it);
     }
@@ -2453,6 +2544,8 @@ void Tick(double now) {
 }
 
 bool Assigned() { return g_asg.active; }
+bool ResumeWaiting() { return g_resumeActive && !g_resumeRestored; }
+bool EndedKickPending() { return !g_kicks.empty(); }
 
 bool RestoreRoundFromLocalBackup(int round, const std::string& by, const std::string& reason, std::string* err,
                                  bool* autoUnpause) {
@@ -2463,6 +2556,12 @@ bool RestoreRoundFromLocalBackup(int round, const std::string& by, const std::st
   }
   if (round < 1) {
     if (err) *err = "round must be >= 1";
+    return false;
+  }
+  // The platform owns a match it assigned (or resumes): its match.assign / resume restores it.
+  // Local crash recovery must not restore it again on top (a round restored twice, 2026-10-16).
+  if (reason == "recovery" && (g_resumeActive || g_asg.active)) {
+    if (err) *err = "the platform resumes this match";
     return false;
   }
   const int mapNumber = std::max(1, MatchStateGet().map_number);

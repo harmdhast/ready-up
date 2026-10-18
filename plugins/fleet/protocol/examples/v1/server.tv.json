@@ -1,0 +1,34 @@
+{
+  "v": 1,
+  "type": "server.tv",
+  "id": "01J8ZQ4T8W6N3X0F2R5K7M9P31",
+  "seq": 12,
+  "ack": 4,
+  "ts": 1790340070000,
+  "ref": null,
+  "payload": {
+    "available": true,
+    "port": 27020,
+    "enabled": true,
+    "delay_seconds": 105,
+    "max_clients": 8,
+    "clients": 3,
+    "secure_bypass": true,
+    "deltaticks_enforce": false,
+    "relay_text_chat": true,
+    "relay_voice": true,
+    "password_set": true,
+    "profile": {
+      "source": "match",
+      "match_id": "m_01J8ZQ",
+      "settings": {
+        "delay_seconds": 105,
+        "allow_insecure_observers": true,
+        "max_clients": 8
+      }
+    },
+    "delay_floor": 105,
+    "casters": 2,
+    "server_insecure": false
+  }
+}

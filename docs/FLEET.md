@@ -131,7 +131,7 @@ Choices made where this document leaves room:
 - Rules enforced from `rules`: `max_rounds`, `overtime`, `tiebreak`, `knife.side_pick_seconds`,
   `clinch_series`, `pause.technical_per_team` / `technical_seconds` / `unpause`,
   `pause.tactical_per_team` / `tactical_seconds` (as `mp_team_timeout_max` / `_time`),
-  `ready.allow_force_ready` / `min_per_team`, `stop.enabled` / `no_damage` and `forfeit.team_absent_seconds` (through the MAT
+  `ready.allow_force_ready` / `team_ready` / `min_per_team`, `stop.enabled` / `no_damage` and `forfeit.team_absent_seconds` (through the MAT
   config the match flow already loads; `plugins/match/readyup/match_rules.h`). Coaches
   (`role: coach`) are whitelisted spectators who coach their team (CS2's coach slot,
   docs/ADMINS.md "Coaches"); no protocol field beyond the role. The gg-vote rules are carried
@@ -576,7 +576,7 @@ under the schema's 64 characters. An update check should compare against GitHub'
 ### 6.2 Heartbeat
 
 Both sides send `ping {t}` every `interval_ms`; the peer replies `pong {t}`. The server adds
-`health: { players, tick_ms_p99, spool_msgs, uptime_s, frame_age_ms }` to its pings. Either side
+`health: { players, tick_ms_p99, spool_msgs, uptime_s, frame_age_ms, steamids? }` to its pings. Either side
 treats the link as dead after `timeout_ms` without a frame and closes it. The platform then marks
 the server `unreachable`, not `dead` (§11.1).
 
@@ -587,6 +587,10 @@ link with `1011 game thread stalled` and does not reconnect until frames come ba
 then sees the server offline and the normal failover runs. An empty server is exempt: it
 hibernates and stops its frames on purpose. `frame_age_ms` in the ping health is the time since the
 last frame (-1 before the first).
+
+Commands from the platform are applied on the game thread, so a hibernating server would take its
+match only once a player joined. fleet.so therefore sets `sv_hibernate_when_empty 0` when it starts
+with a platform to talk to (standalone servers are left alone).
 
 ### 6.3 Reconnect with backoff
 
@@ -708,7 +712,7 @@ count (`MatchState.ready`, the ready HUD, chat) reads 10/10 for a 5v5 with a sub
 rules {
   max_rounds: 24, overtime: { enabled: true, rounds_per_half: 3, max_overtimes: -1 },
   tiebreak?: { damage: boolean, sudden_death_on_tie: boolean },
-  ready: { min_per_team: 0 /* 0 = full roster */, allow_force_ready: true, autoready: false },
+  ready: { min_per_team: 0 /* 0 = full roster */, allow_force_ready: true, team_ready: false, autoready: false },
   knife: { side_pick_seconds: 60 },
   pause: { tactical_per_team: 4, tactical_seconds: 30, technical_per_team: 10,
            technical_seconds?: 300 /* auto-unpause; 0 = none */,
@@ -782,7 +786,7 @@ only disables `match` or sends `practice.set {always}` to a server that has it.
 | `change_map` | `{ map_number }` or `{ name, workshop_id? }` | pre-live only |
 | `swap_teams` | `{}` | `mp_swapteams` + keep team1/team2 mapping |
 | `kick` | `{ steamid64, message? }` | |
-| `say` | `{ text, as_admin?: boolean }` | max 190 bytes, control chars stripped |
+| `say` | `{ text, as_admin?: boolean, from?: string, to?: u64s, team?: "team1" \| "team2", center_seconds?, important? }` | control chars stripped; up to 3 chat lines of 190 bytes (570 in all). `as_admin`: a red `[ADMIN] <from>: <text>` (`from` ≤ 32 bytes) or `[ADMIN] <text>`, without the Ready Up prefix; without `as_admin` the text is plain and `from` is unused. `team`: only that team's roster players (needs the match plugin) |
 | `plugins.set` | `{ enable?: string[], disable?: string[] }` | the core's `ru plugin enable\|disable <name>` for each: loaded / unloaded and remembered across restarts (`csgo/readyup/plugins/plugins.json`). Plugin names `[a-z0-9_-]`, at most 16 per list; `fleet` cannot be disabled over the link (`match` can: a practice server runs core + fleet + practice). Enabling a plugin that is not installed is remembered but loads nothing (the core logs the failed load); hello `plugins_state` shows what is installed. For server profiles ("practice server": practice + skins + whitelist; "official": no practice / skins / midas) |
 | `practice.set` | `{ on?: boolean, always?: boolean }` | practice mode on / off through the practice plugin (prac.cfg + respawn, or back to idle); `always` stores the practice plugin's always=1 (a dedicated practice server: practice on at load and on every map) in `plugins/practice/always.txt`, which wins over practice.cfg. `rejected unsupported` without practice.so, `rejected bad_phase` while a match is loaded |
 | `whitelist.set` | `{ enabled: boolean, steamids?: string[] }` | replaces the whitelist plugin's list and on/off (saved in `plugins/whitelist/whitelist.json`); `rejected unsupported` without whitelist.so. At most 1000 SteamID64 strings |
@@ -798,7 +802,7 @@ only disables `match` or sends `practice.set {always}` to a server that has it.
 server.config { rev: number, settings: {
   chat_prefix: string, admin_chat_prefix: string, hostname_format?: string,
   demo: { path: string, name_format: string },                    // → ru_demo_path / ru_demo_name_format
-  series_end_kick_delay: { no_demo: 30, demo_no_upload: 30, demo_upload: 30 },   // match_end.h defaults
+  series_end_kick_delay: { no_demo: 90, demo_no_upload: 90, demo_upload: 90 },   // match_end.cpp defaults
   offline_pause_minutes: 3,
   scrim_when_idle: true, scrim_knife: true,
   warmup: { message_html?: string, respawn: boolean, money: number },
@@ -909,6 +913,7 @@ applies `patch` when `rev == stored_rev + 1`; on a gap it sends `state.request`.
 | `match_restored` | `{ map_number, round, backup_sha256 }` | restore | failover confirmation |
 | `forfeit` / `gg` | `{ team, reason }` | match | |
 | `admin_called` | `{ call_id, player: { steamid64, name, team: "team1"\|"team2"\|"spectator"\|null, side: "ct"\|"t"\|null }, message, called_at }` | `.admin [message]` (`admin_call.h`, [ADMINS.md](ADMINS.md)) | admin notification; the platform resolves it |
+| `chat` | `{ player: { steamid64, name, team: "team1"\|"team2"\|null, side: "ct"\|"t"\|"spec" }, message, team_only, at }` | a human's say / say_team that is not a command (`chat_forward.h`); at most 5 lines per player per 5 s, message ≤ 300 characters, `at` Unix ms | match chat for admins |
 | `error` | `{ code, message, fatal }` | any | alert admins |
 
 Server-level: `server.availability {availability, reason, detail}` (a `ServerReset` from `match_end.h`
@@ -965,13 +970,18 @@ MatchState {
            used: { team1: { tactical: number, technical: number }, team2: { tactical: number, technical: number } } }
   round: { number: number, started_at?: number, overtime?: number }
   backups: { latest_round?: number }   // the list itself lives on the platform (§12.3)
+  game?: { warmup?: boolean,          // CS2's own warmup flag (CCSGameRules.m_bWarmupPeriod), next to
+                                      // Ready Up's phase: live + warmup = a map stuck in CS2's warmup
+           freeze_period?: boolean }  // CS2's freeze time (m_bFreezePeriod)
   rules: rules
 }
 Team {
   id: string, name: string, tag?: string, side: "ct" | "t" | null,
   score: number, score_ct: number, score_t: number,       // MapStats TeamLine
   players: { [steamid64: string]: { name: string, role: "player" | "sub" | "coach",
-             connected: boolean, ready: boolean, alive?: boolean } }
+             connected: boolean, ready: boolean, alive?: boolean,
+             ping?: number,            // ms, from the controller (m_iPing), while connected
+             connected_at?: number } } // unix ms this player was first seen connected
 }
 ```
 
@@ -985,7 +995,7 @@ snapshot stays around 3 KB.
 |---|---|---|
 | `match_id`, `epoch`, `server_id` | platform | `match.assign` / `match.unassign` |
 | team identity, rosters, roles, spectators, `rules`, map list and sides, `num_maps` | platform (`config_rev`) | server never edits; platform sends `match.update` |
-| `phase`, `round`, `knife`, `pause`, `ready`, all scores, map status/winner, `side`, player `connected/ready/alive` | server (`live_rev`) | platform sends a `cmd`, the server executes it and reports the change |
+| `phase`, `round`, `knife`, `pause`, `ready`, all scores, map status/winner, `side`, player `connected/ready/alive/ping/connected_at`, `game` | server (`live_rev`) | platform sends a `cmd`, the server executes it and reports the change |
 | `maps[].demo`, `backups.latest_round` | server | platform confirms storage (`demo.state = stored` after upload) |
 
 ### 9.3 Conflict rules

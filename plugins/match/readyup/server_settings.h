@@ -17,6 +17,8 @@
 //                                                        core (ru_api set_core_setting) when set at runtime,
 //                                                        empty = the core's readyup.cfg chat_prefix
 //   admin_chat_prefix "<text>"            str   ""       admins' chat name prefix (<Color> tokens), empty = [Admin]
+//   roster_names_enabled 0|1              bool  1        roster players' in-game names are their match roster
+//                                                        names (roster_names.h; match `roster_names` wins)
 //
 // Where a value comes from (first one set wins):
 //   1. the runtime value: console / RCON `ru_<setting> <value>`, chat `.ru settings set <setting>

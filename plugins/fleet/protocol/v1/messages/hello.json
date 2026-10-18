@@ -99,6 +99,10 @@
         }
       }
     },
+    "tv": {
+      "$ref": "../tv.defs.json#/$defs/tvState",
+      "description": "Proposed by Ready Up: GOTV state from the tv plugin (docs/design/tv-plugin.md); absent without tv.so. Changes later arrive as server.tv."
+    },
     "selftest": {
       "type": "object",
       "required": ["pass", "passed", "total", "failures"],

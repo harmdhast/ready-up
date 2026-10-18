@@ -271,6 +271,9 @@ void OnSkinsChat(void*, const ru_command_ctx* ctx) {
   reply("Ready Up skins: reloading your skins. Gloves, agent and the weapons you hold update in a second.");
 }
 
+// A round restart (mp_restartgame, a match going live, a new round): re-gives wait a moment.
+void OnRoundChangeEvent(void*, const char*, const ru_game_event*) { NoteRoundChange(); }
+
 void OnDeathEvent(void*, const char*, const ru_game_event* ev) {
   if (Inert()) return;  // no StatTrak counting either
   try {
@@ -332,6 +335,9 @@ void OnDebugAs(void*, const ru_command_ctx* ctx) {
 }
 
 }  // namespace
+
+bool WarmupLike() { return SkinsReloadAllowed(RuMode()); }
+
 }  // namespace skins
 
 using namespace skins;
@@ -362,6 +368,8 @@ READYUP_PLUGIN_EXPORT int readyup_plugin_load(const ru_api* api, uint32_t core_a
     api->subscribe_game_event(api->self, "item_equip", OnPrefetchEvent, nullptr);
     api->subscribe_game_event(api->self, "item_pickup", OnPrefetchEvent, nullptr);
     api->subscribe_game_event(api->self, "player_death", OnDeathEvent, nullptr);
+    api->subscribe_game_event(api->self, "round_prestart", OnRoundChangeEvent, nullptr);
+    api->subscribe_game_event(api->self, "round_start", OnRoundChangeEvent, nullptr);
     api->register_console_command(api->self, "skins_status", OnStatus, nullptr);
     api->register_console_command(api->self, "skins_refresh", OnRefresh, nullptr);
     api->register_chat_command(api->self, ".skins", OnSkinsChat, nullptr);

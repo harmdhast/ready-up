@@ -10,7 +10,7 @@ API, so they double as examples for your own.
 
 Plugins cooperate through named interfaces (`provide_interface` / `get_interface`): the match plugin
 publishes `readyup.match.v1` (mode, ruleset, map stats; `set_external_mode` lets another plugin such as deathmatch take the server), the practice plugin `readyup.practice.v1`, the whitelist
-plugin `readyup.whitelist.v1`, the skins plugin `readyup.skins.v1` (paint one weapon; Midas uses it), the essentials plugin `readyup.essentials.v1` (default map per mode, map loads). The match plugin owns the match phase; the others read it and stand
+plugin `readyup.whitelist.v1` (its list, and other plugins' guests: the tv plugin's casters), the tv plugin `readyup.tv.v1` (GOTV state, `tv.set`), the skins plugin `readyup.skins.v1` (paint one weapon; Midas uses it), the essentials plugin `readyup.essentials.v1` (default map per mode, map loads). The match plugin owns the match phase; the others read it and stand
 down while a match is loaded or live, and under the valve ruleset. None of them needs another to be
 loaded: each checks for the interface and works on its own (a practice-only server is core + practice).
 
@@ -88,6 +88,15 @@ Weapons picked up by Midas players turn gold, and stay gold when someone else pi
 <br />
 
 For practice and scrim servers: `ru whitelist on`, `ru whitelist add <steamid64>`, and anyone else who joins is kicked (admins and bots stay). Stands down while a match is loaded (the match roster decides then). The list is saved in `plugins/whitelist/whitelist.json`.
+
+</details>
+
+<details>
+<summary><b>TV</b> (<code>plugins/tv</code>): GOTV broadcast settings, Full bundle</summary>
+
+<br />
+
+Owns the server's GOTV settings so they hold for a whole series: `delay_seconds` (`tv_delay`), `allow_insecure_observers` (`tv_secure_bypass 1` + `sv_deltaticks_enforce 0` together, for observers whose CS2 runs `-insecure`, e.g. HLAE / Lexogrine HUD Manager; GOTV only, the game port stays VAC-secured), `max_clients`, `relay_text_chat`, `relay_voice`. Server defaults in `cfg/ReadyUp/tv.cfg` (all comments: it touches nothing until a key is set) or `.ru tv set <key> <value>`; a platform match's `rules.broadcast` (or `.ru tv match <key> <value>`) wins for that match. Applied again after every map load, `mp_restartgame` and match phase change, and put back when the match ends. Never lowers `tv_delay` below what the match asks for (ruleset valve: 105). `.ru tv caster add <steamid64>`: casters may join the game port as spectators (needs the whitelist plugin; the match plugin lets them in as spectators). `.ru tv` (or `.tv`) shows the GOTV port, delay, clients and whether a password is set. Reports the state to the platform (`hello.tv`, `server.tv`) and takes `cmd tv.set`. See [docs/design/tv-plugin.md](design/tv-plugin.md).
 
 </details>
 

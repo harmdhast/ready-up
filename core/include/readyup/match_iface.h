@@ -100,6 +100,9 @@ typedef struct ru_match_v1 {
    * 0 / game_mode 1 (competitive) before its map change. Returns 1 when the mode is what was
    * asked. */
   int (*set_external_mode)(const char* name);
+  /* v1.6 (fleet.so `say {team}`). Game thread. The loaded match's roster team of a player:
+   * 1 = team1, 2 = team2, 0 = not on either roster (a spectator, an admin) or no match loaded. */
+  int (*roster_team)(uint64_t steamid64);
   /* v1.x: members are appended here. */
 } ru_match_v1;
 

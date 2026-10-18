@@ -112,6 +112,11 @@ CVAR_RE = re.compile(r'^\s*"?([a-z][a-z0-9_]+)"?\s*=\s*"?([^"\s]*)')
 
 MATCH_SLUG = "livetest"
 
+# Postgame -> idle: Ready Up clears the match at the series-end kick, restart_delay - 1 +
+# series_end_kick_delay (90 s default since #234) after Game Over. With the CS2 default tv_delay 10
+# and a demo: restart_delay 35 s -> 124 s. A tv_delay 105 match (ruleset valve) needs 130 - 1 + 90.
+IDLE_AFTER_SERIES_TIMEOUT = 180
+
 # --ruleset valve: overrides under test (on top of Valve's preset) and what differs because of them.
 VALVE_OVERRIDES = {"freezetime": 5, "spectators_max": 8, "default_models": True, "overtime": {"startmoney": 12500}}
 VALVE_DIFFERS = "freezetime,overtime.startmoney,spectators_max,default_models"
@@ -974,7 +979,7 @@ class Runner:
                           chk_game_over, None,
                           lambda f_: (f_.game_over[1] + " | " + rounds_detail(f_)) if f_.game_over else rounds_detail(f_)))
         steps.append(Step("postgame (mode=postgame, match loaded)", 30, chk_postgame))
-        steps.append(Step("idle: match cleared (idle, match=none)", 90, chk_idle_after_postgame))
+        steps.append(Step("idle: match cleared (idle, match=none)", IDLE_AFTER_SERIES_TIMEOUT, chk_idle_after_postgame))
         return steps
 
     def forfeit_steps(self, f, mark, since, chk_postgame_any, chk_idle_after_postgame) -> list[Step]:
@@ -1085,7 +1090,7 @@ class Runner:
             Step("forfeit: team1 forfeits after 20s", 60, chk_ff("ff3", "team1 (team_absent) forfeits map"), None,
                  ff_detail("ff3")),
             Step("postgame (forfeit map result)", 30, chk_postgame_any),
-            Step("idle: match cleared (idle, match=none)", 90, chk_idle_after_postgame),
+            Step("idle: match cleared (idle, match=none)", IDLE_AFTER_SERIES_TIMEOUT, chk_idle_after_postgame),
         ]
 
     def valve_steps(self, f, a, mark, since, bots_ok, act_selftest, chk_selftest, act_reset, chk_reset,

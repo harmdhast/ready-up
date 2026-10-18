@@ -55,10 +55,47 @@ bool MatchOwnsRoster(const std::string& ruMode) {
   return ruMode == "match_warmup" || ruMode == "match_knife" || ruMode == "match_live" || ruMode == "postgame";
 }
 
-bool ShouldKick(const State& s, const std::string& ruMode, uint64_t steamid64, bool isBot, bool isAdmin) {
-  if (!s.enabled || isBot || steamid64 == 0 || isAdmin) return false;
+bool ShouldKick(const State& s, const std::string& ruMode, uint64_t steamid64, bool isBot, bool isAdmin,
+                bool isGuest) {
+  if (!s.enabled || isBot || steamid64 == 0 || isAdmin || isGuest) return false;
   if (MatchOwnsRoster(ruMode)) return false;
   return s.steamids.count(steamid64) == 0;
+}
+
+bool ValidGuestOwner(const std::string& owner) {
+  if (owner.empty() || owner.size() > 32) return false;
+  for (unsigned char c : owner) {
+    if (!(std::islower(c) || std::isdigit(c) || c == '_' || c == '-')) return false;
+  }
+  return true;
+}
+
+bool Guests::Set(const std::string& owner, const std::vector<uint64_t>& ids, bool* changed) {
+  if (changed) *changed = false;
+  if (!ValidGuestOwner(owner) || ids.size() > kMaxGuestsPerOwner) return false;
+  std::set<uint64_t> next;
+  for (uint64_t id : ids) {
+    if (ParseSteamId64(std::to_string(id))) next.insert(id);
+  }
+  auto it = byOwner.find(owner);
+  const bool same = it == byOwner.end() ? next.empty() : it->second == next;
+  if (changed) *changed = !same;
+  if (next.empty()) byOwner.erase(owner);
+  else byOwner[owner] = std::move(next);
+  return true;
+}
+
+bool Guests::Is(uint64_t steamid64) const {
+  for (const auto& kv : byOwner) {
+    if (kv.second.count(steamid64)) return true;
+  }
+  return false;
+}
+
+size_t Guests::Count() const {
+  std::set<uint64_t> all;
+  for (const auto& kv : byOwner) all.insert(kv.second.begin(), kv.second.end());
+  return all.size();
 }
 
 }  // namespace whitelist

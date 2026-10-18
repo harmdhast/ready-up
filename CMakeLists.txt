@@ -23,11 +23,13 @@ add_library(server_shim SHARED
   core/src/readyup/banner.cpp
   core/src/readyup/ccommand.cpp
   core/src/readyup/chat.cpp
+  core/src/readyup/chat_highlight.cpp
   core/src/readyup/center_html.cpp
   core/src/readyup/cs2_version.cpp
   core/src/readyup/client_print.cpp
   core/src/readyup/client_command_hook.cpp
   core/src/readyup/command_buffer_hook.cpp
+  core/src/readyup/stay_awake.cpp
   core/src/readyup/config.cpp
   core/src/readyup/console_command.cpp
   core/src/readyup/crash_handler.cpp
@@ -405,10 +407,23 @@ target_include_directories(readyup_chat_rules_test PRIVATE ${CMAKE_SOURCE_DIR}/c
 target_compile_options(readyup_chat_rules_test PRIVATE -Wall -Wextra)
 add_test(NAME chat_rules COMMAND readyup_chat_rules_test)
 
-# Human presence registry (core/src/readyup/slot_registry.h).
+# Chat line coloring: .commands green, numbers gold (core/src/readyup/chat_highlight.h).
+add_executable(readyup_chat_highlight_test tests/chat_highlight_test.cpp core/src/readyup/chat_highlight.cpp)
+target_include_directories(readyup_chat_highlight_test PRIVATE ${CMAKE_SOURCE_DIR}/core/src)
+target_compile_options(readyup_chat_highlight_test PRIVATE -Wall -Wextra)
+add_test(NAME chat_highlight COMMAND readyup_chat_highlight_test)
+
+# Which command text turns empty-server hibernation back on (core/src/readyup/stay_awake.h).
+add_executable(readyup_stay_awake_test tests/stay_awake_test.cpp core/src/readyup/stay_awake.cpp)
+target_include_directories(readyup_stay_awake_test PRIVATE ${CMAKE_SOURCE_DIR}/core/src)
+target_compile_options(readyup_stay_awake_test PRIVATE -Wall -Wextra)
+add_test(NAME stay_awake COMMAND readyup_stay_awake_test)
+
+# Who is connected, from log lines (core/src/readyup/slot_registry.h).
 add_executable(readyup_slot_registry_test tests/slot_registry_test.cpp core/src/readyup/slot_registry.cpp)
 target_include_directories(readyup_slot_registry_test PRIVATE ${CMAKE_SOURCE_DIR}/core/src)
 target_compile_options(readyup_slot_registry_test PRIVATE -Wall -Wextra)
+add_test(NAME slot_registry COMMAND readyup_slot_registry_test)
 
 # Plugin time per server frame, `ru perf` (core/src/readyup/perf_stats.h).
 add_executable(readyup_perf_stats_test tests/perf_stats_test.cpp core/src/readyup/perf_stats.cpp)
@@ -463,10 +478,14 @@ target_compile_options(readyup_plugin_state_test PRIVATE -Wall -Wextra)
 enable_testing()
 add_test(NAME center_panel_owner COMMAND readyup_center_panel_owner_test)
 add_test(NAME skins_reload COMMAND skins_reload_test)
+# Knife swaps: only a knife the plugin swapped in reverts to stock (plugins/skins/knife_swap.h).
+add_executable(skins_knife_swap_test plugins/skins/tests/knife_swap_test.cpp)
+target_include_directories(skins_knife_swap_test PRIVATE ${CMAKE_SOURCE_DIR}/plugins/skins)
+target_compile_options(skins_knife_swap_test PRIVATE -Wall -Wextra)
+add_test(NAME skins_knife_swap COMMAND skins_knife_swap_test)
 add_test(NAME plugin_state COMMAND readyup_plugin_state_test)
 add_test(NAME plugin_needs COMMAND readyup_plugin_needs_test)
 add_test(NAME ru_help COMMAND readyup_ru_help_test)
-add_test(NAME slot_registry COMMAND readyup_slot_registry_test)
 add_test(NAME license COMMAND readyup_license_test)
 add_test(NAME license_status COMMAND readyup_license_status_test)
 add_test(NAME load_order COMMAND readyup_load_order_test)
@@ -492,8 +511,20 @@ add_subdirectory(plugins/whitelist)
 # readyup-addons (plugins/addons): Steam Workshop addons, plus its unit test.
 add_subdirectory(plugins/addons)
 
+# readyup-mapvote (plugins/mapvote): .rtv / .nominate / end-of-map vote, plus its unit test.
+add_subdirectory(plugins/mapvote)
+
+# readyup-community (plugins/community): .rank / .top / .speclist / .kick, plus its unit test.
+add_subdirectory(plugins/community)
+
+# readyup-movement (plugins/movement): surf / bhop / kz timers and records, plus its unit test.
+add_subdirectory(plugins/movement)
+
 # readyup-deathmatch (plugins/deathmatch): FFA / team deathmatch, plus its unit test.
 add_subdirectory(plugins/deathmatch)
+
+# readyup-tv (plugins/tv): GOTV broadcast settings, casters, plus its unit test.
+add_subdirectory(plugins/tv)
 
 # readyup-match (plugins/match): the match flow, plus its host test (after enable_testing()).
 add_subdirectory(plugins/match)

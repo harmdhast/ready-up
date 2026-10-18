@@ -15,6 +15,7 @@
 #include "readyup/modes.h"
 #include "readyup/pause_state.h"
 #include "readyup/players.h"
+#include "readyup/round_restore_rules.h"
 #include "readyup/vote_logic.h"
 
 #include <algorithm>
@@ -281,6 +282,7 @@ void VotesStop(uint64_t /*voter*/, WebhookTeam team, const std::string& name) {
   std::string err;
   bool autoUnpause = false;
   if (!fleet_bridge::RestoreRoundFromLocalBackup(round, "vote", "stop", &err, &autoUnpause)) {
+    err = restore::ExplainRestoreError(err);
     Print("vote: stop: passed, restore of round %d failed: %s\n", round, err.c_str());
     SendToChat(("Ready Up: .stop passed but round " + std::to_string(round) + " cannot be restored (" + err + ").").c_str());
     return;

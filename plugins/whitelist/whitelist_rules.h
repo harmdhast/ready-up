@@ -4,8 +4,10 @@
 // No engine calls; whitelist_plugin.cpp is the engine side.
 
 #include <cstdint>
+#include <map>
 #include <set>
 #include <string>
+#include <vector>
 
 namespace whitelist {
 
@@ -27,8 +29,22 @@ uint64_t ParseSteamId64(const std::string& s);
 // whitelist stands down in these ru_modes.
 bool MatchOwnsRoster(const std::string& ruMode);
 
-// Kick a connected player? Never bots (steamid 0), admins, or anyone while it is off or a match
-// owns the roster.
-bool ShouldKick(const State& s, const std::string& ruMode, uint64_t steamid64, bool isBot, bool isAdmin);
+// Kick a connected player? Never bots (steamid 0), admins, guests, or anyone while it is off or a
+// match owns the roster.
+bool ShouldKick(const State& s, const std::string& ruMode, uint64_t steamid64, bool isBot, bool isAdmin,
+                bool isGuest = false);
+
+// Guests (readyup.whitelist.v1 set_guests): other plugins' lists of players to let in (tv.so's
+// casters), per owner, not saved.
+constexpr size_t kMaxGuestsPerOwner = 256;
+bool ValidGuestOwner(const std::string& owner);
+struct Guests {
+  std::map<std::string, std::set<uint64_t>> byOwner;
+  // Replaces owner's list (SteamID64s only; others dropped). *changed = the list is different.
+  // False = bad owner or too many ids (nothing changed).
+  bool Set(const std::string& owner, const std::vector<uint64_t>& ids, bool* changed);
+  bool Is(uint64_t steamid64) const;
+  size_t Count() const;
+};
 
 }  // namespace whitelist

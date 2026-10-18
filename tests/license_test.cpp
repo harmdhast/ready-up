@@ -111,8 +111,54 @@ static void RunVectors() {
   CHECK(license::PlayerLine(r).empty());
 }
 
+static void RunStanding() {
+  std::ifstream f(READYUP_LICENSE_VECTORS);
+  std::stringstream ss;
+  ss << f.rdbuf();
+  minijson::ParseError err;
+  const auto doc = minijson::Parse(ss.str(), &err);
+  CHECK(doc.has_value());
+  if (!doc) return;
+  const minijson::Value* k = &doc->get("keys")->arr[0];
+  const std::string kid = k->get("kid")->str, x = k->get("x")->str;
+  const std::vector<license::PublicKey> table = {{kid.c_str(), x.c_str()}};
+  const minijson::Value* st = doc->get("standing");
+  CHECK(st != nullptr);
+  if (!st) return;
+  const std::string key = st->get("key")->str, lease = st->get("lease")->str, unmarked = st->get("unmarked")->str;
+
+  auto at = [&](const std::string& lz, const std::string& state, const std::string& stops, const std::string& today) {
+    return license::StandingFor(key, lz, state, stops, today, &table);
+  };
+  // Free / not genuine: never enforced.
+  CHECK(!license::StandingFor("", "", "", "", "2027-03-01", &table).paid);
+  CHECK(license::StandingFor(key.substr(0, key.size() - 4) + "AAAA", "", "", "", "2027-03-01", &table).status == "invalid");
+  // A lease is never the key.
+  CHECK(!license::StandingFor(lease, "", "", "", "2027-03-01", &table).paid);
+  // Paid, then late, then stopped, offline.
+  CHECK(at("", "", "", "2027-03-01").status == "active");
+  CHECK(at("", "", "", "2027-03-16").status == "past_due");
+  CHECK(at("", "", "", "2027-03-16").stops_on == "2027-03-30");
+  CHECK(at("", "", "", "2027-03-29").status == "past_due");
+  CHECK(at("", "", "", "2027-03-30").status == "expired");
+  CHECK(at("", "", "", "2027-03-30").reason == "unpaid");
+  // The lease moves it on; terms without the lease mark don't.
+  CHECK(at(lease, "", "", "2027-03-30").status == "active");
+  CHECK(at(lease, "", "", "2027-03-30").max_servers == 20);
+  CHECK(at(unmarked, "", "", "2027-03-30").status == "expired");
+  // Replaced: a day, then stopped. In use elsewhere: stopped at once.
+  CHECK(at("", "replaced", "2027-03-02", "2027-03-01").status == "past_due");
+  CHECK(at("", "replaced", "2027-03-02", "2027-03-02").status == "expired");
+  CHECK(at("", "replaced", "2027-03-02", "2027-03-02").reason == "replaced");
+  CHECK(at("", "in_use_elsewhere", "2027-03-01", "2027-03-01").reason == "in_use_elsewhere");
+  CHECK(at("", "in_use_elsewhere", "2027-03-01", "2027-03-01").status == "expired");
+  CHECK(license::AddDays("2027-02-28", 1) == "2027-03-01");
+  CHECK(license::AddDays("2027-12-31", 14) == "2028-01-14");
+}
+
 int main() {
   RunVectors();
+  RunStanding();
 
   // Embedded keys: the website's current signing key, 32 raw bytes each.
   const auto& keys = license::EmbeddedPublicKeys();

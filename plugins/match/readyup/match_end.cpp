@@ -1,5 +1,8 @@
 #include "readyup/match_end.h"
 
+#include "readyup/card_html.h"
+#include "readyup/result_card.h"
+
 #include "readyup/at_payloads.h"
 
 #include "readyup/engine.h"
@@ -24,9 +27,9 @@ namespace {
 constexpr double kResetAfterKickSeconds = 2.0;
 
 std::mutex g_mu;
-int g_kickNoDemo = 30;
-int g_kickDemoNoUpload = 30;
-int g_kickDemoUpload = 30;
+int g_kickNoDemo = 90;
+int g_kickDemoNoUpload = 90;
+int g_kickDemoUpload = 90;
 std::vector<MatchFlowListener> g_listeners;
 std::atomic<unsigned> g_generation{0};
 std::atomic<int> g_pending{0};
@@ -193,6 +196,9 @@ MapEndPlan MatchEndOnMapComplete(const MapEndInput& in) {
   mapEv.team2Score = in.team2Score;
   mapEv.seriesOver = in.seriesOver;
   mapEv.nextMap = in.nextMap;
+  mapEv.decidedByDamage = in.decidedByDamage;
+  mapEv.team1Damage = in.team1Damage;
+  mapEv.team2Damage = in.team2Damage;
   {
     std::lock_guard<std::recursive_mutex> lk(stats::Mutex());
     stats::Current().EndMap();
@@ -211,7 +217,20 @@ MapEndPlan MatchEndOnMapComplete(const MapEndInput& in) {
         in.mapNumber, recording ? 1 : 0, hasUpload ? 1 : 0, tvDelay, plan.restartDelay, plan.tvFlushDelay,
         in.seriesOver ? 1 : 0);
 
+  ResultCardInfo card;
+  card.team1 = base.team1Name;
+  card.team2 = base.team2Name;
+  card.decidedByDamage = in.decidedByDamage;
+  card.team1Damage = in.team1Damage;
+  card.team2Damage = in.team2Damage;
   if (!in.seriesOver) {
+    card.winner = in.winner == "team1" || in.winner == "team2" ? in.winner : "";
+    card.team1Score = in.team1Score;
+    card.team2Score = in.team2Score;
+    card.mapNumber = in.mapNumber;
+    card.mapName = in.mapName;
+    card.nextMap = in.nextMap;
+    ResultCardShow(MapResultCardHtml(card), std::max(1, plan.restartDelay - 1), "map result");
     ScheduleNextMap(std::max(1, plan.restartDelay - 1), in.nextMap, gen);
     return plan;
   }
@@ -234,6 +253,12 @@ MapEndPlan MatchEndOnMapComplete(const MapEndInput& in) {
   // Existing webhook (shape unchanged); time_until_restore now carries the real delay.
   WebhookEmitSeriesEnd(in.team1SeriesScore, in.team2SeriesScore, seriesWinner.c_str(), resetIn);
 
+  card.winner = seriesWinner == "none" ? "" : seriesWinner;
+  card.team1Score = in.team1SeriesScore;
+  card.team2Score = in.team2SeriesScore;
+  card.forfeit = !winnerName.empty() && !in.seriesWinner.empty();
+  ResultCardShow(SeriesResultCardHtml(card), resetIn, "series result");
+
   if (!winnerName.empty() && !in.seriesWinner.empty()) {
     SendToChat(("Ready Up: " + winnerName + " won the series by forfeit.").c_str());
   } else if (!winnerName.empty()) {
@@ -244,6 +269,9 @@ MapEndPlan MatchEndOnMapComplete(const MapEndInput& in) {
   } else {
     SendToChat("Ready Up: the series ended in a draw.");
   }
+
+  // Where to go now (a live test, 2026-10-15): the platform's match page has the next match.
+  if (!base.scrim) SendToChat("Ready Up: go back to the platform to view your next match.");
 
   if (base.scrim) {
     // Pickup games: nobody is kicked, the scrim just unloads.

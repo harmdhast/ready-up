@@ -243,6 +243,26 @@ static void TestFeederTrim() {
   CHECK(!g.Trim(1.0, 11, 5, 5, 5, 5, &q));
 }
 
+static void TestHeldSeats() {
+  std::map<uint64_t, double> live = {{1, 0}, {2, 0}};
+  // Both on: nothing held.
+  CHECK(sim::HeldSeats(&live, {1, 2}, 100, 300).empty());
+  // 2 leaves: its seat is held, from when it left.
+  CHECK(sim::HeldSeats(&live, {1}, 110, 300) == std::vector<uint64_t>{2});
+  CHECK(live[2] == 110);
+  CHECK(sim::HeldSeats(&live, {1}, 400, 300) == std::vector<uint64_t>{2});
+  // Back in time: not missing any more.
+  CHECK(sim::HeldSeats(&live, {1, 2}, 405, 300).empty());
+  CHECK(live[2] == 0);
+  // Gone past the hold: a bot may take the seat (and it is forgotten).
+  CHECK(sim::HeldSeats(&live, {1}, 500, 300) == std::vector<uint64_t>{2});
+  CHECK(sim::HeldSeats(&live, {1}, 801, 300).empty());
+  CHECK(live.count(2) == 0);
+  // No hold time: never held.
+  std::map<uint64_t, double> none = {{3, 0}};
+  CHECK(sim::HeldSeats(&none, {}, 10, 0).empty());
+}
+
 static void TestMixedFill() {
   CHECK(!Has(sim::FillSetupCommands(), "bot_kick"));
   CHECK(!Has(sim::FillTeardownCommands(), "bot_kick"));
@@ -265,6 +285,7 @@ static void TestMixedFill() {
 }
 
 int main() {
+  TestHeldSeats();
   TestMixedFill();
   TestTimescale();
   TestIdentities();

@@ -23,6 +23,15 @@ typedef struct ru_whitelist_v1 {
   int (*set)(int enabled, const uint64_t* steamids, uint32_t count);
   /* 1 = on. *count (if not NULL) = players on the list. */
   int (*get)(uint32_t* count);
+  /* ---- appended (tv plugin casters, docs/design/tv-plugin.md). Check struct_size. ---- */
+  /* Guests: players another plugin lets in while it runs (tv.so's casters). Replaces `owner`'s
+   * whole list (count 0 clears it); not saved, so the owner sets it again after a whitelist reload
+   * (re-setting the same list is a no-op). The whitelist never kicks a guest; the match plugin's
+   * roster check lets guests in as spectators. owner = [a-z0-9_-]{1,32}, at most 256 ids.
+   * 1 = stored. */
+  int (*set_guests)(const char* owner, const uint64_t* steamids, uint32_t count);
+  /* 1 = a guest of any owner. */
+  int (*is_guest)(uint64_t steamid64);
 } ru_whitelist_v1;
 
 #ifdef __cplusplus

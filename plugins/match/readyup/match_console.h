@@ -25,7 +25,12 @@ bool LoadMatchFromUrl(const std::string& url);
 // `firstMapNumber` (1, or the map a fleet failover resumes), also when the server is already on
 // it (LoadMapEntry). Game thread.
 // Used by `ru match load` and by the fleet link's match.assign (fleet_bridge.cpp).
-void ApplyLoadedMatch(const WebhookMatchContext& ctx, const std::string& configJson, int firstMapNumber = 1);
+// Loads the match. False (nothing changes, the reason printed) when the server's paid license has
+// stopped (core ru_api 1.15 license_stopped): unpaid, its key replaced, or in use elsewhere.
+bool ApplyLoadedMatch(const WebhookMatchContext& ctx, const std::string& configJson, int firstMapNumber = 1);
+
+// Why a new match can't be loaded on this server (a stopped paid license), or "".
+std::string LicenseStoppedReason();
 
 // Changes to a map list entry (map_names.h): `host_workshop_map <id>` for a workshop map (and
 // remembers the id so the map that loads is bound to it), else `changelevel <name>`. False (and

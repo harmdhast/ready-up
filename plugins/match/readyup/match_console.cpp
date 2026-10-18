@@ -8,6 +8,7 @@
 #include "readyup/demo_recorder.h"
 #include "readyup/engine.h"
 #include "readyup/esports.h"
+#include "readyup/host.h"
 #include "readyup/http_client.h"
 #include "readyup/logging.h"
 #include "readyup/map_names.h"
@@ -510,7 +511,20 @@ bool LoadMapEntry(const std::string& entry) {
   return EnqueueServerCommand(cmd.c_str());
 }
 
-void ApplyLoadedMatch(const WebhookMatchContext& loaded, const std::string& configJson, int firstMapNumber) {
+std::string LicenseStoppedReason() {
+  const ru_api* api = host::Api();
+  char buf[512];
+  if (RU_API_HAS(api, license_stopped) && api->license_stopped && api->license_stopped(api->self, buf, sizeof(buf)) > 0) {
+    return buf;
+  }
+  return {};
+}
+
+bool ApplyLoadedMatch(const WebhookMatchContext& loaded, const std::string& configJson, int firstMapNumber) {
+  if (const std::string why = LicenseStoppedReason(); !why.empty()) {
+    PrintLine(why.c_str());
+    return false;
+  }
   if (firstMapNumber < 1) firstMapNumber = 1;
   // Maps the config gives no side: knife or team1_ct by knife_enabled_default (match_settings.h),
   // fixed here so a knife pick (WebhookUpdateMapSide) has an entry to update.
@@ -578,6 +592,7 @@ void ApplyLoadedMatch(const WebhookMatchContext& loaded, const std::string& conf
     ModesAwaitMapLoad();  // the server's map and score until then
     (void)LoadMapEntry(ctx.maplist[idx]);
   }
+  return true;
 }
 
 namespace {

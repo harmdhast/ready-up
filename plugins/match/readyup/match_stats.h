@@ -88,6 +88,14 @@ struct PlayerRound {
   bool mvp = false;
   int clutch_vs = 0;       // >0: was the last alive against this many enemies
   bool clutch_won = false;
+  // Economy (round_economy.h): money when the round started and after the freeze-time buys,
+  // armour, helmet, defuse kit and what they carried into the round. -1 = not read.
+  int money_start = -1;
+  int money_after_buy = -1;
+  int armor = -1;
+  bool helmet = false;
+  bool defuser = false;
+  std::vector<std::string> loadout;  // "ak47", "smokegrenade", ... (weapon_ dropped)
 };
 
 struct RoundSummary {
@@ -159,6 +167,11 @@ class StatsAccumulator {
   void OnRoundEnd(int winnerSide, int reason);
   // Engine scoreboard score (CCSPlayerController::m_iScore).
   void SetScore(uint64_t id, int score);
+  // The player's money at the round start (round_economy.h).
+  void SetMoneyStart(uint64_t id, int money);
+  // What the player has when the freeze time ends: money left, armour, helmet, kit, loadout.
+  void SetLoadout(uint64_t id, int moneyAfterBuy, int armor, bool helmet, bool defuser,
+                  const std::vector<std::string>& loadout);
 
   int Team1Score() const { return t1_.score; }
   int Team2Score() const { return t2_.score; }

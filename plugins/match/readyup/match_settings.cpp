@@ -129,6 +129,9 @@ void NoMatchKickTick(double now) {
   const ReadyUpMode mode = GetMode();
   if (mode == ReadyUpMode::Practice || mode == ReadyUpMode::External) return;  // an admin chose it
   if (fleet_bridge::Assigned()) return;  // a fleet match is loading
+  // The match that just ended keeps its players for the series-end delay (time for a gg): its own
+  // kick comes then. Kicking at once here sent everyone off the moment the series ended.
+  if (fleet_bridge::EndedKickPending()) return;
   for (const auto& h : ListHumans()) {
     if (h.steamid64 == 0 || h.userid < 0 || IsReadyUpAdmin(h.steamid64)) continue;
     auto it = g_lastKick.find(h.steamid64);

@@ -16,6 +16,9 @@ namespace skins {
 extern const ru_api* g_api;
 void Log(int level, const char* fmt, ...) RU_PRINTF(2, 3);
 bool DebugOn();  // readyup.cfg debug=1 (any thread)
+// Whether nothing is being played (Ready Up's idle, practice or a match / scrim warmup, or no
+// match plugin): a new loadout may swap the held weapons and gloves at once. Game thread.
+bool WarmupLike();
 // Ruleset "valve" (docs/ESPORTS-MODE.md, Valve rulebook: inventories "should not be modified or
 // augmented"): the plugin applies and restores nothing. Asked from the match plugin
 // (readyup.match.v1 inventory_locked), else readyup.cfg `ruleset=`; refreshed once a second on the
@@ -109,6 +112,14 @@ bool SetPlayerNameTagExternal(uint64_t steamid64, const char* nameTag);
 // `.skins reload`: about a second from now, gloves + agent again and the held weapons repainted
 // with the (re-read) loadout. Game thread.
 void RequestReapply(int slot);
+// A round restart happened (round_prestart / round_start): re-gives wait a moment.
+void NoteRoundChange();
+// A new loadout came from the platform for this player (any thread). In warmup their held
+// weapons are swapped for ones with the new skins right away (like `.skins reload`); in a live
+// round nothing changes until the next spawn, so a fight never loses its weapon mid-round.
+void QueueWarmupRegive(uint64_t steamid64);
+// A player's first loadout arrived: repaint what they hold (they may have spawned before it).
+void QueueFirstLoadoutRepaint(uint64_t steamid64);
 
 // ---- StatTrak (stattrak.cpp) -------------------------------------------------------------
 void OnPlayerDeath(const ru_game_event* ev);

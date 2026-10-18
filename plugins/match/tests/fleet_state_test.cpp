@@ -79,6 +79,22 @@ static void TestLiveStream() {
   CHECK(rev == 2);
   CHECK_STR(patch.Dump(), R"({"live_rev":2})");
 
+  // Rev only (event.chat): rev + 1, patch = live_rev only, even with a pending state change;
+  // that change still goes out with the next Advance().
+  Json pending = next;
+  pending["phase"] = "live";
+  CHECK(s.BumpRevOnly(&patch, &rev));
+  CHECK(rev == 3);
+  CHECK_STR(patch.Dump(), R"({"live_rev":3})");
+  CHECK(s.Advance(pending, false, &patch, &rev));
+  CHECK(rev == 4);
+  CHECK_STR(patch.Dump(), R"({"live_rev":4,"phase":"live"})");
+  {
+    fs::LiveStream empty;
+    CHECK(!empty.BumpRevOnly(&patch, &rev));  // no state yet: the caller uses Advance()
+    CHECK(empty.Rev() == 0);
+  }
+
   // A removed member becomes null; applying every patch in order reproduces the state.
   Json replay = fs::StripNulls(base);
   replay["live_rev"] = 0;
@@ -399,6 +415,14 @@ static void TestRulesetAssign() {
   CHECK(err.find("rules.overrides: unknown override \"freeztime\"") != std::string::npos);
   CHECK(!fs::ValidateAssign(with(R"({"overrides":{"overtime":{"limit":-1}}})", veto), &err));
   CHECK(err.find("overtime.limit") != std::string::npos);
+
+  // rules.broadcast (tv.so's GOTV profile, libs/readyup/broadcast_profile.h): validated here too.
+  CHECK(fs::ValidateAssign(with(R"({"broadcast":{"allow_insecure_observers":true,"max_clients":8}})", veto), &err));
+  CHECK(!fs::ValidateAssign(with(R"({"broadcast":{"allow_insecure_observers":"yes"}})", veto), &err) &&
+        err.find("rules.broadcast") != std::string::npos);
+  CHECK(!fs::ValidateAssign(with(R"({"broadcast":{"tv_delay":105}})", veto), &err));
+  CHECK(!fs::ValidateAssign(with(R"({"ruleset":"valve","broadcast":{"delay_seconds":20}})", veto), &err) &&
+        err.find("below") != std::string::npos);
 
   const Json q = with(R"({"ruleset":"valve","overrides":{"freezetime":3,"overtime":{"startmoney":12500}}})", veto);
   CHECK(fs::ValidateAssign(q, &err));

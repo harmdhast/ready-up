@@ -11,6 +11,7 @@ set(MATCH_SOURCES
   readyup/at_payloads.cpp
   readyup/backup_files.cpp
   readyup/stale_backups.cpp
+  readyup/chat_forward.cpp
   readyup/card_html.cpp
   readyup/golive_card_logic.cpp
   readyup/coach.cpp
@@ -29,11 +30,13 @@ set(MATCH_SOURCES
   readyup/fleet_state.cpp
   readyup/game_timers.cpp
   readyup/golive_card.cpp
+  readyup/result_card.cpp
   readyup/host.cpp
   readyup/idle_refresh.cpp
   readyup/warmup_ammo.cpp
   readyup/warmup_money.cpp
   readyup/warmup_score.cpp
+  readyup/round_economy.cpp
   readyup/weapon_cleanup.cpp
   readyup/hud_steady.cpp
   readyup/knife_tracker.cpp
@@ -71,6 +74,8 @@ set(MATCH_SOURCES
   readyup/retention_rules.cpp
   readyup/round_restore.cpp
   readyup/round_restore_rules.cpp
+  readyup/roster_names.cpp
+  readyup/roster_names_rules.cpp
   readyup/ruleset.cpp
   readyup/scrim_flow.cpp
   readyup/server_settings.cpp
@@ -83,6 +88,7 @@ set(MATCH_SOURCES
   readyup/wingman.cpp
   readyup/workers.cpp
   # Shared engine-free code (libs/readyup).
+  ${CMAKE_SOURCE_DIR}/libs/readyup/broadcast_profile.cpp
   ${CMAKE_SOURCE_DIR}/libs/readyup/http_client.cpp
   ${CMAKE_SOURCE_DIR}/libs/readyup/json_store.cpp
   ${CMAKE_SOURCE_DIR}/libs/readyup/minijson.cpp
@@ -131,7 +137,7 @@ set_tests_properties(match_host PROPERTIES TIMEOUT 120)
 # sha256 / base64, validators, resume blocks), workshop map names (readyup/map_names.h) and the stats rewind
 # of round restores (ctest `match_fleet_state`).
 add_executable(match_fleet_state_test tests/fleet_state_test.cpp readyup/fleet_state.cpp readyup/map_names.cpp
-  readyup/match_stats.cpp readyup/match_config_parser.cpp readyup/match_rules.cpp readyup/ruleset.cpp ${CMAKE_SOURCE_DIR}/libs/readyup/minijson.cpp
+  readyup/match_stats.cpp readyup/match_config_parser.cpp readyup/match_rules.cpp readyup/ruleset.cpp ${CMAKE_SOURCE_DIR}/libs/readyup/minijson.cpp ${CMAKE_SOURCE_DIR}/libs/readyup/broadcast_profile.cpp
   ${CMAKE_SOURCE_DIR}/libs/readyup/status_snapshot.cpp ${CMAKE_SOURCE_DIR}/libs/readyup/steamid.cpp)
 target_include_directories(match_fleet_state_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/libs
   ${CMAKE_SOURCE_DIR}/core/include)
@@ -188,7 +194,7 @@ add_test(NAME match_ruleset COMMAND match_ruleset_test)
 # ctest `match_coach_rules`).
 add_executable(match_coach_rules_test tests/coach_rules_test.cpp readyup/coach_rules.cpp readyup/fleet_state.cpp
   readyup/map_names.cpp readyup/match_stats.cpp readyup/match_config_parser.cpp readyup/match_rules.cpp readyup/ruleset.cpp
-  ${CMAKE_SOURCE_DIR}/libs/readyup/minijson.cpp ${CMAKE_SOURCE_DIR}/libs/readyup/status_snapshot.cpp
+  ${CMAKE_SOURCE_DIR}/libs/readyup/minijson.cpp ${CMAKE_SOURCE_DIR}/libs/readyup/broadcast_profile.cpp ${CMAKE_SOURCE_DIR}/libs/readyup/status_snapshot.cpp
   ${CMAKE_SOURCE_DIR}/libs/readyup/steamid.cpp)
 target_include_directories(match_coach_rules_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/libs
   ${CMAKE_SOURCE_DIR}/core/include)
@@ -284,3 +290,24 @@ add_executable(match_log_relay_test tests/log_relay_test.cpp readyup/log_relay.c
 target_include_directories(match_log_relay_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_options(match_log_relay_test PRIVATE -Wall -Wextra)
 add_test(NAME match_log_relay COMMAND match_log_relay_test)
+
+# Player chat to the platform (readyup/chat_forward.h: log line parser, rate limit, event.chat
+# data) and the team lock's move rule (readyup/team_lock.h) (ctest `match_chat_forward`).
+add_executable(match_chat_forward_test tests/chat_forward_test.cpp readyup/chat_forward.cpp readyup/admin_call_logic.cpp
+  ${CMAKE_SOURCE_DIR}/libs/readyup/status_snapshot.cpp ${CMAKE_SOURCE_DIR}/libs/readyup/steamid.cpp)
+target_include_directories(match_chat_forward_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/libs)
+target_compile_options(match_chat_forward_test PRIVATE -Wall -Wextra)
+add_test(NAME match_chat_forward COMMAND match_chat_forward_test)
+
+# Roster display names (readyup/roster_names_rules.h): name sanitizing, when the feature is on, the
+# name a player gets, write / restore decisions; the match config `roster_names` rule and coach names
+# (ctest `match_roster_names`).
+add_executable(match_roster_names_test tests/roster_names_test.cpp readyup/roster_names_rules.cpp
+  readyup/fleet_state.cpp readyup/map_names.cpp readyup/match_stats.cpp readyup/match_config_parser.cpp
+  readyup/match_rules.cpp readyup/ruleset.cpp ${CMAKE_SOURCE_DIR}/libs/readyup/minijson.cpp
+  ${CMAKE_SOURCE_DIR}/libs/readyup/broadcast_profile.cpp
+  ${CMAKE_SOURCE_DIR}/libs/readyup/status_snapshot.cpp ${CMAKE_SOURCE_DIR}/libs/readyup/steamid.cpp)
+target_include_directories(match_roster_names_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/libs
+  ${CMAKE_SOURCE_DIR}/core/include)
+target_compile_options(match_roster_names_test PRIVATE -Wall -Wextra)
+add_test(NAME match_roster_names COMMAND match_roster_names_test)

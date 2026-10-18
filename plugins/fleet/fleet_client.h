@@ -87,8 +87,14 @@ struct HelloInfo {
   std::string pluginsDir;
   // hello.selftest: SelftestPayload() of the core's latest selftest; "" = none yet (left out).
   std::string selftestJson;
+  // hello.tv / state.snapshot.tv: the tv plugin's tvState (readyup.tv.v1, tv.defs.json); "" = no
+  // tv.so (left out).
+  std::string tvJson;
   // ping health
   int players = 0;
+  // The connected humans' Steam ids (ping.health.steamids): the platform sends their skins on a
+  // server with no match, where no player_connect event says who is there.
+  std::vector<uint64_t> steamids;
   double tickMsP99 = 0.0;
   int64_t startedMs = 0;
 };
@@ -161,7 +167,7 @@ class Client {
   bool SendSnapshot(const std::string& reason, const std::string& extraJson);
 
   void SetHelloInfo(HelloInfo info);
-  void UpdateHealth(int players, double tickMsP99);
+  void UpdateHealth(int players, double tickMsP99, std::vector<uint64_t> steamids = {});
   // Game thread, every frame (simulating or not): the watchdog's heartbeat.
   void NoteGameFrame();
   // Milliseconds since the last NoteGameFrame, or -1 before the first.
@@ -257,6 +263,7 @@ class Client {
   std::atomic<bool> holdOut_{false};
   std::atomic<int64_t> lastFrameMono_{0};
   std::atomic<int> players_{0};
+  std::atomic<bool> pingSoon_{false};  // a player joined: the next loop pings early
   // True while the watchdog holds the link down (see ClientConfig::stallMs).
   bool GameStalled(int64_t nowMono) const;
   int wakeFd_[2] = {-1, -1};

@@ -59,7 +59,9 @@ struct HumanIdentity {
 
 std::vector<HumanIdentity> ListHumans();
 
-// Refreshes the off-thread view (host.cpp calls it every frame).
+// Refreshes the view (host.cpp calls it at the start of every frame).
 void PlayersRefreshCache();
+// A player connected, left or changed team: the next read on the game thread reads the engine again.
+void PlayersInvalidate();
 
 }  // namespace readyup

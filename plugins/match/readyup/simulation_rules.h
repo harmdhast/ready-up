@@ -65,6 +65,13 @@ struct FillPlan {
   std::vector<int> removeUserids;
 };
 FillPlan PlanFill(int playersPerTeam, int humansCt, int humansT, const std::vector<Bot>& bots);
+
+// Bot fill, live: roster humans who left keep their seat (no bot takes it) for `holdSeconds`.
+// `missingSince` maps each human seen live to when they went missing (0 = on the server);
+// `here` is who is on now. Updates it (drops those past the hold) and returns the seats still
+// held, so the side stays short and CS2's auto 5v5 pause waits for them.
+std::vector<uint64_t> HeldSeats(std::map<uint64_t, double>* missingSince, const std::vector<uint64_t>& here,
+                                double now, int holdSeconds);
 std::vector<std::string> FillSetupCommands();
 std::vector<std::string> FillTeardownCommands();
 

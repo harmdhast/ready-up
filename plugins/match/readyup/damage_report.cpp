@@ -14,6 +14,7 @@
 
 #include <cstring>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace readyup {
@@ -31,6 +32,13 @@ struct Outgoing {
 };
 std::vector<Outgoing> g_out;
 int g_outRound = 0;
+// Who was on a team when the round started: someone who joined mid-round gets no report
+// for it (it would be all zeros: a scrim player taking a bot's place saw one on joining).
+std::unordered_set<int> g_roundStartSlots;
+// Everyone on a team at the round start: a player who leaves mid-round still shows in the
+// others' reports with the damage done to and by them (2026-10-15, a live test).
+std::vector<DamageParticipant> g_roundStartPlayers;
+bool g_haveRoundStart = false;
 
 int TeamOf(int slot) {
   if (slot < 0) return 0;
@@ -62,14 +70,21 @@ void BuildReports() {
   if (!a) return;
   Collect c;
   a->for_each_player(a->self, &CollectPlayer, &c);
+  // Who left since the round started: no report for them (gone), but they are in everyone else's.
+  std::unordered_set<int> here;
+  for (const auto& p : c.players) here.insert(p.key);
+  std::vector<DamageParticipant> all = c.players;
+  for (const auto& p : g_roundStartPlayers) {
+    if (!here.count(p.key)) all.push_back(p);
+  }
   g_out.clear();
   g_outRound = MatchStateGet().round_number;
   for (size_t i = 0; i < c.players.size(); ++i) {
     Outgoing o;
     o.slot = c.players[i].key;
-    o.human = c.human[i];
+    o.human = c.human[i] && (!g_haveRoundStart || g_roundStartSlots.count(o.slot) > 0);
     o.name = c.players[i].name;
-    o.lines = FormatDamageReport(c.players[i], c.players, g_ledger);
+    o.lines = FormatDamageReport(c.players[i], all, g_ledger);
     if (!o.lines.empty()) g_out.push_back(std::move(o));
   }
 }
@@ -80,6 +95,12 @@ void OnGameEvent(void*, const char* name, const ru_game_event* ev) {
   if (std::strcmp(name, "round_start") == 0) {
     g_ledger.Reset();
     g_enemyDamage = false;
+    Collect c;
+    a->for_each_player(a->self, &CollectPlayer, &c);
+    g_roundStartSlots.clear();
+    for (const auto& p : c.players) g_roundStartSlots.insert(p.key);
+    g_roundStartPlayers = c.players;
+    g_haveRoundStart = true;
   } else if (std::strcmp(name, "player_hurt") == 0) {
     const int victim = a->ev_get_player_slot(a->self, ev, "userid");
     const int attacker = a->ev_get_player_slot(a->self, ev, "attacker");
@@ -92,6 +113,17 @@ void OnGameEvent(void*, const char* name, const ru_game_event* ev) {
   } else if (std::strcmp(name, "player_death") == 0) {
     g_ledger.OnDeath(a->ev_get_player_slot(a->self, ev, "userid"));
   } else if (std::strcmp(name, "round_end") == 0) {
+    // Warmup rounds never end (mp_ignore_round_win_conditions 1): one that does means something
+    // reset the warmup rules (a game mode cfg, another plugin). Said without debug=1, not every time.
+    if (GetMode() == ReadyUpMode::MatchWarmup) {
+      static int warmupRoundEnds = 0;
+      ++warmupRoundEnds;
+      if (warmupRoundEnds <= 3 || warmupRoundEnds % 50 == 0) {
+        Print("warmup: a round ended during match warmup (%d so far, reason %d): the warmup rules were "
+              "reset by something else (game mode cfg, another plugin)\n",
+              warmupRoundEnds, a->ev_get_int(a->self, ev, "reason", -1));
+      }
+    }
     if (!Cfg().damage_report || GetMode() != ReadyUpMode::MatchLive) return;
     if (!PlayerExtrasAllowed(CurrentEffectiveRules())) return;  // valve ruleset: no report
     BuildReports();

@@ -1,6 +1,7 @@
 #include "readyup/chat.h"
 
 #include "readyup/chat_colors.h"
+#include "readyup/chat_highlight.h"
 #include "readyup/client_print.h"
 #include "readyup/command_buffer_hook.h"
 #include "readyup/config.h"
@@ -173,7 +174,14 @@ static void SendToChatImpl(const char* msg) {
   // CS2 / CounterStrikeSharp-style chat color control bytes.
   const std::string coloredPrefix = ChatPrefix() + " ";
   Debug("chat: SendToChatImpl msg=\"%s\"\n", s.c_str());
-  SendSayPayload(coloredPrefix + s);
+  SendSayPayload(coloredPrefix + HighlightChatText(s));
+}
+
+void SendImportantToChat(const char* msg) {
+  std::string s = Trim(StripNewlines(msg ? msg : ""));
+  if (s.empty()) return;
+  const std::string line = ChatPrefix() + " " + std::string(1, ChatColors::Gold) + s;
+  for (int i = 0; i < 3; ++i) SendSayPayload(line);
 }
 
 void AnnounceToChat(const char* msg) {
@@ -187,7 +195,7 @@ void SendToChat(const char* msg) {
 
 bool SendToSlotChat(int slot, const char* msg) {
   if (slot < 0 || !msg || !*msg) return false;
-  const std::string p = SanitizeForSay(ChatPrefix() + " " + Trim(StripNewlines(msg)));
+  const std::string p = SanitizeForSay(ChatPrefix() + " " + HighlightChatText(Trim(StripNewlines(msg))));
   return !p.empty() && ClientPrintChat(slot, p.c_str());
 }
 

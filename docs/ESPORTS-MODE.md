@@ -368,6 +368,14 @@ pauses the default flow does not expect.
   neither team. If the engine did not pause after all, the freeze time ends and Ready Up clears it
   (`pause: ended (freeze time ended: the engine is not paused (auto_5v5))`). The halftime pause now
   has its own HUD panel too (it showed "PAUSED BY ADMIN").
+- Engine pause at go-live: CS2 pauses at map load with `sv_matchpause_auto_5v5 1` and nobody on a
+  team yet, and that pause outlives warmup and the go-live restart. When the knife round starts,
+  the map goes live or a resume goes live, an engine pause Ready Up did not start is cleared
+  (`mp_unpause_match`, console `pause: cleared a stale engine pause at go-live (auto_5v5 from map
+  load)`) when both sides are full; with a side short it stays and is recorded as `auto_5v5`.
+  Any other engine pause Ready Up did not start (held 3 s on a knife round or live map) is recorded
+  too, as `auto_5v5` (a side short, rule on) or `engine` (the platform sees `technical`, by
+  `server`; HUD "GAME PAUSED"), and both teams `.unpause` it, so `.up` is never a no-op.
 - GOTV at go-live: under `valve` the match does not go live (straight to live, the knife round, `ru
   match start`, fleet cmd `start`) while no GOTV client is on the map: the match plugin looks for a
   player controller with `CBasePlayerController::m_bIsHLTV` about twice a second, and calls GOTV down

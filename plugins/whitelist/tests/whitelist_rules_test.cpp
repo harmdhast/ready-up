@@ -46,6 +46,20 @@ int main() {
   State off = w;
   off.enabled = false;
   CHECK(!ShouldKick(off, "idle", B, false, false));
+
+  // Guests (set_guests, tv.so's casters): never kicked, per owner, replaced as a whole.
+  CHECK(!ShouldKick(w, "idle", B, false, false, /*isGuest=*/true));
+  Guests g;
+  bool changed = false;
+  CHECK(g.Set("tv", {B}, &changed) && changed && g.Is(B) && !g.Is(A) && g.Count() == 1);
+  CHECK(g.Set("tv", {B}, &changed) && !changed);  // the same list again: no change
+  CHECK(g.Set("other", {A, B}, &changed) && changed && g.Count() == 2);
+  CHECK(g.Set("tv", {}, &changed) && changed && g.Is(B) && g.Is(A));  // still other's guest
+  CHECK(g.Set("other", {}, &changed) && changed && !g.Is(A) && !g.Is(B) && g.Count() == 0);
+  CHECK(g.Set("tv", {}, &changed) && !changed);
+  CHECK(!g.Set("TV!", {A}, &changed) && !g.Set("", {A}, &changed) && !g.Is(A));
+  CHECK(g.Set("tv", {A, 12345}, &changed) && g.Count() == 1);  // not a SteamID64: dropped
+  CHECK(!g.Set("tv", std::vector<uint64_t>(kMaxGuestsPerOwner + 1, A), &changed) && g.Count() == 1);
   std::printf("whitelist_rules_test: %s\n", g_failures ? "FAIL" : "PASS");
   return g_failures ? 1 : 0;
 }

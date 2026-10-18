@@ -64,6 +64,16 @@ struct RestoreCheck {
 // "" = the restore may run; otherwise the reason (one chat line).
 std::string RestoreRefusal(const RestoreCheck& c);
 
+// CS2 writes round backups only when started with this flag; without it no restore finds a file.
+inline constexpr const char* kRoundBackupFlag = "-allow_round_backup_files";
+// The hint shown when a restore finds no backup file.
+const char* BackupFlagHint();
+// `err` from a failed restore ("no backup readyup_backup_..."), with BackupFlagHint() appended when
+// the file was simply missing. Other errors come back unchanged.
+std::string ExplainRestoreError(const std::string& err);
+// Whether raw /proc/<pid>/cmdline bytes (NUL-separated arguments) contain `arg` exactly.
+bool CmdlineHasArg(const std::string& raw, const std::string& arg);
+
 // ---- pause after a restore -------------------------------------------------------------------
 
 // Effective `pause_after_restore` (1 / 0): the match config (MAT key / fleet

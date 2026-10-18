@@ -8,7 +8,8 @@
  *   api->provide_interface(api->self, RU_ESSENTIALS_IFACE_NAME, RU_ESSENTIALS_IFACE_VERSION, &iface);
  *
  * Default maps live in csgo/readyup/plugins/essentials/default_maps.json (`ru map default <mode>
- * <map>`); the platform is meant to push them over the fleet link later.
+ * <map>`, or the platform's practice.set {home_map} for "practice"). A dedicated practice server
+ * (practice always=1) goes back to its "practice" default map whenever nobody is on it.
  *
  * Same ABI rules as plugin_api.h: plain C, members only appended, struct_size first. Game thread.
  */
@@ -31,6 +32,10 @@ typedef struct ru_essentials_v1 {
    * Workshop link): changelevel / host_workshop_map, with the map change card and the download
    * progress bar. No mode check (the caller decides). 1 = queued, 0 = not a valid entry / the command buffer is not ready. */
   int (*load_map)(const char* entry);
+  /* Appended (check struct_size): sets the default map of `mode` like `ru map default <mode>
+   * <map>` (the fleet's practice.set {home_map} sets "practice"); "" clears it. 1 = stored; 0 = a
+   * bad mode or map, or default_maps.json could not be saved. */
+  int (*set_default_map)(const char* mode, const char* entry);
 } ru_essentials_v1;
 
 #ifdef __cplusplus

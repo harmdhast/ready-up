@@ -344,10 +344,12 @@ jobs:
           # (which waits for a simulating GameFrame) and plugin loading never happen.
           # +log on: the game log lines (players, bots, rounds) Ready Up and the live test read;
           # csm's server.cfg turns it on for every real server.
+          # -allow_round_backup_files: since the October 2026 update CS2 writes round backups only
+          # with it (csm adds it since v1.27.4); without it the selftest's round backup check warns.
           # The console streams into this log as it happens (line buffered) and into a file.
           # $CI_EXEC: on a csm instance, in its view (csm instance exec).
           READYUP_SELFTEST_AND_QUIT=1 READYUP_SELFTEST_FILE="$OUT/readyup_selftest.txt" READYUP_SELFTEST_TIMEOUT=300 \
-            stdbuf -oL -eL timeout 900 $CI_EXEC "$CS2_CI_DIR/game/cs2.sh" -dedicated -console -usercon -port "$CS2_CI_PORT" \
+            stdbuf -oL -eL timeout 900 $CI_EXEC "$CS2_CI_DIR/game/cs2.sh" -dedicated -console -usercon -allow_round_backup_files -port "$CS2_CI_PORT" \
             +sv_lan 1 +sv_hibernate_when_empty 0 +log on +game_type 0 +game_mode 1 +map de_dust2 2>&1 \
             | stdbuf -oL tee "$OUT/selftest-console.log"
           rc=${PIPESTATUS[0]}

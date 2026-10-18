@@ -4,6 +4,7 @@
 #include "readyup/engine.h"
 #include "readyup/logging.h"
 #include "readyup/match_events.h"
+#include "readyup/match_features.h"
 #include "readyup/match_state.h"
 #include "readyup/modes.h"
 #include "readyup/players.h"
@@ -34,6 +35,10 @@ struct FillData {
   double noticedAt = 0;
   double resumeAt = 0;
   sim::BotFeeder feeder;
+  // Roster humans seen on the server while the map was live, and when each went missing
+  // (0 = here). A missing one keeps their seat: no bot takes it, so the side is short and
+  // CS2's auto 5v5 pause holds the match for them, until the disconnect pause time is up.
+  std::map<uint64_t, double> liveHumans;
 };
 FillData g_fill;  // game-thread owned
 bool Team1IsCtNow(const WebhookMatchContext& ctx);
@@ -76,12 +81,23 @@ void FillTick(double now, const std::optional<WebhookMatchContext>& ctx) {
   }
   int humansCt = 0, humansT = 0;
   const bool team1Ct = Team1IsCtNow(*ctx);
+  std::set<uint64_t> here;
   for (const auto& h : ListHumans()) {
     if (!ctx->roster_team.count(h.steamid64) || ctx->coaches.count(h.steamid64)) continue;
+    here.insert(h.steamid64);
     // Reserve the roster side as soon as the human connects, even while spectating:
     // a full bot side must not prevent the arriving human from joining it.
     const bool isTeam1 = ctx->roster_team.at(h.steamid64) == WebhookTeam::Team1;
     if (isTeam1 == team1Ct) ++humansCt;
+    else ++humansT;
+    if (mode == ReadyUpMode::MatchLive) s.liveHumans[h.steamid64] = 0;
+  }
+  // A live human who left keeps their seat while the disconnect pause allows.
+  const std::vector<uint64_t> hereList(here.begin(), here.end());
+  for (uint64_t id : sim::HeldSeats(&s.liveHumans, hereList, now, std::max(0, EffectiveRules().disconnect_pause_max_seconds))) {
+    const auto team = ctx->roster_team.find(id);
+    if (team == ctx->roster_team.end()) continue;
+    if ((team->second == WebhookTeam::Team1) == team1Ct) ++humansCt;
     else ++humansT;
   }
   std::vector<sim::Bot> bots;
@@ -92,6 +108,9 @@ void FillTick(double now, const std::optional<WebhookMatchContext>& ctx) {
     if (b.team == 3) ++ct;
     else if (b.team == 2) ++t;
   }
+  // While the match is live, bots change only in freeze time: a bot kicked or
+  // added mid-round respawned in front of the players (2026-10-12).
+  if (mode == ReadyUpMode::MatchLive && !MatchFeaturesInFreeze()) return;
   const auto plan = sim::PlanFill(ctx->players_per_team > 0 ? ctx->players_per_team : kFullTeam, humansCt, humansT, bots);
   if (!plan.removeUserids.empty()) {
     // Remove only an excess bot, never a human or the GOTV spectator.

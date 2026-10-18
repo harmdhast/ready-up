@@ -14,15 +14,23 @@ namespace readyup {
 namespace {
 
 // Networked entities (weapons are) sit below this index. A sweep walks kSlice indices per tick,
-// so the whole list takes 16 ticks (a quarter second at 64 tick).
+// (see g_limit: a sweep ends past the highest slot in use; every 8th covers the whole range).
 constexpr int kMaxIndex = 16384;
-constexpr int kSlice = 1024;
+constexpr int kSlice = 256;  // per call (16 calls a second): a 2048-slot map is swept in half a second
 // Index 0 is the world, 1..64 the player controllers.
 constexpr int kFirstIndex = 65;
 
 int g_offOwner = -2;  // CBaseEntity::m_hOwnerEntity (-2 = not looked up)
 bool g_unavailableLogged = false;
 int g_cursor = kFirstIndex;
+// A map uses a few thousand entity slots at most: a sweep ends a margin past the highest slot the
+// last sweep found in use, not at kMaxIndex (2026-10-15: the full range was most of the match
+// plugin's per-tick time).
+int g_passMax = kFirstIndex;   // highest slot in use seen during this sweep
+int g_limit = kMaxIndex;       // where this sweep ends
+constexpr int kLimitMargin = 512;
+constexpr int kMinLimit = 2048;
+int g_passes = 0;  // every 8th sweep covers the whole range, so slots past the limit are found too
 int g_removed = 0;  // this pass (debug line)
 bool g_enabled = true;  // readyup.cfg warmup_weapon_cleanup
 double g_nextCfg = 0;
@@ -85,14 +93,18 @@ void WeaponCleanupTick(double now) {
   if (!WeaponCleanupActive(GetModeString(), GoLiveTriggered(), g_enabled)) {
     g_tracker.Clear();
     g_cursor = kFirstIndex;
+    g_limit = kMaxIndex;
+    g_passMax = kFirstIndex;
     return;
   }
   const ru_api* a = host::Api();
   if (!a || !Resolve(a)) return;
-  const int end = std::min(kMaxIndex, g_cursor + kSlice);
+  const int end = std::min(g_limit, g_cursor + kSlice);
   for (int i = g_cursor; i < end; ++i) {
     void* ent = a->entity_by_index(a->self, i);
-    if (!ent || !WeaponCleanupClass(a->entity_classname(a->self, ent))) continue;
+    if (!ent) continue;
+    g_passMax = i;
+    if (!WeaponCleanupClass(a->entity_classname(a->self, ent))) continue;
     const uint32_t h = a->entity_handle_of(a->self, ent);
     if (h == 0xFFFFFFFFu) continue;
     if (HasOwner(a, ent)) {
@@ -104,9 +116,11 @@ void WeaponCleanupTick(double now) {
     }
   }
   g_cursor = end;
-  if (g_cursor < kMaxIndex) return;
+  if (g_cursor < g_limit) return;
   // Pass done.
   g_cursor = kFirstIndex;
+  g_limit = (++g_passes & 7) == 0 ? kMaxIndex : std::min(kMaxIndex, std::max(kMinLimit, g_passMax + kLimitMargin));
+  g_passMax = kFirstIndex;
   g_tracker.Prune(now);
   if (g_removed) Debug("weapon-cleanup: removed %d dropped weapon(s)\n", g_removed);
   g_removed = 0;

@@ -15,6 +15,10 @@ namespace readyup {
 
 // Load: registers the match-flow / demo listeners.
 void MatchStatusInstall();
+// CS2's own pause state (the game rules' m_bMatchWaitingForResume / m_bGamePaused): 1 paused or
+// waiting to pause, 0 not, -1 unknown (off the game thread, no game rules yet, schema missing).
+// Game thread; a cached handle and two byte reads.
+int EngineMatchPaused();
 
 // readyup.match.v1 get_status (game thread).
 int MatchStatusGet(ru_match_status* out);

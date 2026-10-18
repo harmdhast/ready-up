@@ -91,6 +91,9 @@ everything else (`.r`, `.pause`, `.stay` / `.switch`, `.settings`, `.coach`, `.a
 | `.ru admins add\|remove <steamid64\|name_fragment>` | admin (standalone) | edit `admins.json` |
 | `.ru hud test <1-11>` | admin | a HUD test panel, to you only |
 | `.ru whitelist on\|off\|add\|remove\|list\|clear` | admin | whitelist plugin: only listed players may stay (not during a match) |
+| `.ru tv [status]` / `.tv` | admin | tv plugin: GOTV port, delay, clients, insecure observers, password set, the profile in use |
+| `.ru tv set\|match <key> <value\|default>` | admin | tv plugin: server setting (saved) / this match only. Keys `delay_seconds`, `allow_insecure_observers`, `max_clients`, `relay_text_chat`, `relay_voice` ([design/tv-plugin.md](design/tv-plugin.md)) |
+| `.ru tv caster add\|remove <steamid64>` / `list` / `clear`, `.ru tv reapply` | admin | tv plugin: casters who may join as spectators; send every GOTV value again |
 | `.ru midas` / `.ru midas give\|take <player>` | admin | midas plugin: who is Midas and why (midas_steamids, given, best player); give Midas to a player (again: takes it back) / take a given Midas back (`<player>`: part of the name or a SteamID64; kept in `plugins/midas/given.txt`) |
 | `.ru plugin list\|load\|unload\|reload <name>` | admin | plugins (core); load / unload last until a restart |
 | `.ru plugin enable\|disable <name>` | admin | load / unload a plugin and keep it that way after a restart (`csgo/readyup/plugins/plugins.json`) |

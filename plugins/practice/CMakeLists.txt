@@ -5,8 +5,9 @@ readyup_add_plugin(practice practice_plugin.cpp practice_rules.cpp practice_feed
   practice_scenarios.cpp scenario.cpp ${CMAKE_SOURCE_DIR}/libs/readyup/minijson.cpp
   # Shared engine-free code (libs/readyup): the lineup files.
   ${CMAKE_SOURCE_DIR}/libs/readyup/json_store.cpp
-  ${CMAKE_SOURCE_DIR}/libs/readyup/status_snapshot.cpp)
-target_include_directories(readyup_plugin_practice PRIVATE ${CMAKE_SOURCE_DIR}/libs)
+  ${CMAKE_SOURCE_DIR}/libs/readyup/status_snapshot.cpp
+  ${CMAKE_SOURCE_DIR}/plugins/match/readyup/map_names.cpp)
+target_include_directories(readyup_plugin_practice PRIVATE ${CMAKE_SOURCE_DIR}/plugins/match ${CMAKE_SOURCE_DIR}/libs)
 target_link_libraries(readyup_plugin_practice PRIVATE pthread)  # ru scenario convert worker
 target_compile_definitions(readyup_plugin_practice PRIVATE PRACTICE_VERSION="${READYUP_SEMVER}")
 

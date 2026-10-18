@@ -81,6 +81,7 @@ void SendToChat(const char* msg) {
   g_chat.push_back(msg);
 }
 void SendRawToChat(const char* msg) { SendToChat(msg); }
+void SendImportantToChat(const char* msg) { SendToChat(msg); }
 bool ClientPrintChat(int, const char* msg) {
   SendToChat(msg);
   return true;
@@ -549,7 +550,7 @@ int main(int argc, char** argv) {
     rp::TryDispatchChat(76561198000000001ull, "alice", ".help", 2);
     rp::Frame(true);
     Check(Sent("changelevel de_other"), "admin: .ru map change de_other -> changelevel");
-    Check(Chatted("Ready Up admin: .ru help"), "admin: .help points at .ru help");
+    Check(Chatted(".ru help  admin commands"), "admin: .help points at .ru help");
     Check(!Chatted("Licensed to"), ".help: no license line by default");
     readyup::g_showLicense = true;
     ClearLog();

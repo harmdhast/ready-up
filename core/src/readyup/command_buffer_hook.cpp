@@ -10,6 +10,7 @@
 #include "readyup/selftest.h"
 #include "readyup/sigtest.h"
 #include "readyup/status_feed.h"
+#include "readyup/stay_awake.h"
 #include "readyup/version.h"
 
 #include <dlfcn.h>
@@ -234,6 +235,20 @@ static void Hook_AddText(void* thisptr, const char* text, int a, int b, bool c, 
   }
 
   if (g_orig) g_orig(thisptr, text, a, b, c, d, e);
+
+  // Keep an empty server awake (stay_awake.h): once at startup, and again after anything that
+  // turns hibernation back on. Queued after `text`, so it wins over a cfg line in the same call.
+  if (g_orig) {
+    static std::atomic<bool> s_sentOnce{false};
+    const bool first = !s_sentOnce.exchange(true);
+    const bool turnedOn = !first && text && TextTurnsHibernateOn(text);
+    if (first || turnedOn) {
+      const std::string cmd = std::string(kStayAwakeCommand) + "\n";
+      g_orig(thisptr, cmd.c_str(), a, b, c, d, e);
+      Print("core: %s (an empty server must keep running frames so Ready Up plugins load)\n",
+            first ? "keeping the server awake when empty" : "hibernation was turned on again; keeping the server awake");
+    }
+  }
 }
 
 // Minimal ELF PLT/GOT patcher for the current process.

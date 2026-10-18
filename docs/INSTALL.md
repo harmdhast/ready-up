@@ -221,9 +221,14 @@ Where a value comes from, first one set wins: the saved / runtime value, then `r
 `match.cfg` (the same key without `ru_`, e.g. `playout_enabled_default=1`; the older keys
 `min_players_to_ready` and `scrim_knife` are read as `minimum_ready_required` and
 `knife_enabled_default`), then the default above. A match config sets its own value for one match
-with `playout`, `whitelist`, `autoready`, `min_players_to_ready` and `players_per_team` (fleet:
-`rules.playout`, `rules.whitelist`, `rules.ready.autoready`, `rules.ready.min_per_team`, and the team
-size from the players' roles when a team has a `sub`).
+with `playout`, `whitelist`, `autoready`, `roster_names`, `min_players_to_ready` and `players_per_team`
+(fleet: `rules.playout`, `rules.whitelist`, `rules.ready.autoready`, `rules.roster_names`,
+`rules.ready.min_per_team`, and the team size from the players' roles when a team has a `sub`).
+
+Roster names: while a match is loaded, roster players (and named coaches) play under the name the
+match config gives them (scoreboard, kill feed, chat, server log), not their Steam name. On by
+default when the match names its players; `ru_roster_names_enabled 0` or the match's
+`roster_names: false` turns it off. When the match unloads they get their own name back.
 
 Substitutes: a team is ready when `minimum_ready_required` of its roster are READY (0 = a full
 team) and every connected player a full team needs is READY. A connected substitute beyond the full

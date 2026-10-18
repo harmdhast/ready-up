@@ -346,7 +346,7 @@ API_SURFACE = {
     "player_teleport": _ENTSYS,
     "entity_create": _ENTSYS,
     "entity_spawn": _ENTSYS,
-    # 1.14: SetPawn / CCSPlayerController::Respawn are core entries, optional for the same reason
+    # 1.16: SetPawn / CCSPlayerController::Respawn are core entries, optional for the same reason
     # (a break turns respawn off, engine_feature_available("respawn") = 0).
     "player_respawn": _ENTSYS,
     "set_round_termination_suppressed": ["CCSGameRules_TerminateRound"],

@@ -69,6 +69,7 @@ These arrived as bootstrap `commands[]` (`ru_<setting> <value>`). Now they are R
 | Whitelist enabled default | Setting `.whitelist`; match `whitelist` / fleet `rules.whitelist` wins | done | tested | none | – |
 | Kick when no match loaded | Server setting, default 0 | done | tested | none | – |
 | Playout enabled default | Setting `.playout`; match `playout` / fleet `rules.playout` wins | done | tested | none | – |
+| Roster display names | Roster players play under their match config names (`team1/2.players {steamid64: name}`, fleet `players[].name`): controller `m_iszPlayerName` + entity changed, put back within a second after the engine resets it (`roster_names.h`). Server setting `roster_names_enabled` (default 1); match `roster_names` / fleet `rules.roster_names` wins | done | tested (logic) | none | – |
 | Reset cvars on series end | Server setting (default 1). The warmup cvars reset and the match's own `cvars{}` go back to their pre-match values, read at match load with `ru_api` 1.11 `cvar_query` and kept across a reload or restart (`cvar_snapshot.h`) | done | tested | none | – |
 | Tactical pause via `.pause` | Server setting `use_pause_command_for_tactical_pause` (default 0) | done | tested | none | – |
 | Autostart mode | Server setting `scrim_when_idle` (`ru_scrim_when_idle`, default 1; `server.config.scrim_when_idle`): off = an idle server stays idle when players join, until `.ru mode scrim` or a match (`scrim_flow.cpp`) | done | tested | none | – |

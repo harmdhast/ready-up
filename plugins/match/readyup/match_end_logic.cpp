@@ -69,6 +69,10 @@ std::string ToJson(const MatchFlowEvent& e) {
          ",\"demo_recorded\":" + (e.demoRecorded ? "true" : "false") +
          ",\"demo_upload_configured\":" + (e.demoUploadConfigured ? "true" : "false") +
          ",\"stats\":" + stats::ToJson(e.stats);
+    if (e.decidedByDamage) {
+      j += ",\"decided_by\":\"damage\",\"damage\":{\"team1\":" + std::to_string(e.team1Damage) +
+           ",\"team2\":" + std::to_string(e.team2Damage) + "}";
+    }
   } else if (e.type == MatchFlowEventType::SeriesEnd) {
     j += ",\"seconds_until_reset\":" + std::to_string(e.secondsUntilReset);
   }
