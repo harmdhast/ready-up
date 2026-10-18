@@ -86,6 +86,34 @@ static void TestPauses() {
   CHECK(!UnpauseSatisfied(false, false, false, 0));
 }
 
+// An engine pause Ready Up did not start: cleared at go-live when both sides are full (the stale
+// map-load pause, 2026-10-17), recorded when a side is short or outside the go-live window.
+static void TestEnginePause() {
+  using A = EnginePauseAction;
+  // The final: paused since map load, 5v5, live just started, no Ready Up pause -> clear it.
+  CHECK(DecideEnginePause(1, false, true, true, true, 5, 5, 5, 0) == A::Clear);
+  CHECK(DecideEnginePause(1, false, true, true, false, 5, 5, 5, 0) == A::Clear);
+  // A side short at go-live: a real auto_5v5 pause, recorded, not fought.
+  CHECK(DecideEnginePause(1, false, true, true, true, 4, 5, 5, 0) == A::MarkAuto5v5);
+  CHECK(DecideEnginePause(1, false, true, true, true, 5, 3, 5, 0) == A::MarkAuto5v5);
+  CHECK(DecideEnginePause(1, false, true, true, false, 4, 5, 5, 0) == A::MarkEngine);
+  // Ready Up's own pause, the engine not paused or unknown, warmup: nothing.
+  CHECK(DecideEnginePause(1, true, true, true, true, 5, 5, 5, 0) == A::None);
+  CHECK(DecideEnginePause(0, false, true, true, true, 5, 5, 5, 99) == A::None);
+  CHECK(DecideEnginePause(-1, false, true, true, true, 5, 5, 5, 99) == A::None);
+  CHECK(DecideEnginePause(1, false, false, true, true, 5, 5, 5, 99) == A::None);
+  // Outside the window: recorded once held for the hold time (Ready Up's own pause commands
+  // race the engine for a frame or two), never cleared.
+  CHECK(DecideEnginePause(1, false, true, false, true, 5, 5, 5, 0) == A::None);
+  CHECK(DecideEnginePause(1, false, true, false, true, 5, 5, 5, kEnginePauseMarkHoldSeconds - 0.1) == A::None);
+  CHECK(DecideEnginePause(1, false, true, false, true, 5, 5, 5, kEnginePauseMarkHoldSeconds) == A::MarkEngine);
+  CHECK(DecideEnginePause(1, false, true, false, true, 4, 5, 5, kEnginePauseMarkHoldSeconds) == A::MarkAuto5v5);
+  // Wingman: full is players_per_team (2), not 5.
+  CHECK(DecideEnginePause(1, false, true, true, false, 2, 2, 2, 0) == A::Clear);
+  CHECK(DecideEnginePause(1, false, true, true, false, 1, 2, 2, 0) == A::MarkEngine);
+  CHECK(DecideEnginePause(1, false, true, true, true, 5, 5, 0, 0) == A::Clear);  // 0 = 5
+}
+
 static void TestAuto5v5() {
   // Rule on, live, not paused: a side short of 5 players at a round start means the engine pauses.
   CHECK(!Auto5v5PauseExpected(true, true, false, 5, 5));
@@ -97,12 +125,47 @@ static void TestAuto5v5() {
   CHECK(!Auto5v5PauseExpected(false, true, false, 4, 5));
   CHECK(!Auto5v5PauseExpected(true, false, false, 4, 5));
   CHECK(!Auto5v5PauseExpected(true, true, true, 4, 5));
+  // Only when CS2 really paused (2026-10-17, server-2: a stale count of 4 v 4 with 10 players on
+  // teams marked a pause at every round start, ended at freeze end).
+  CHECK(Auto5v5Decide(true, true, false, 0, 4, 4) == Auto5v5Check::Wait);
+  CHECK(Auto5v5Decide(true, true, false, 1, 4, 5) == Auto5v5Check::Mark);
+  CHECK(Auto5v5Decide(true, true, false, 1, 5, 5) == Auto5v5Check::Done);  // an admin's pause
+  CHECK(Auto5v5Decide(true, true, true, 1, 4, 5) == Auto5v5Check::Done);
+  CHECK(Auto5v5Decide(false, true, false, 1, 4, 5) == Auto5v5Check::Done);
+  CHECK(Auto5v5Decide(true, false, false, 1, 4, 5) == Auto5v5Check::Done);
+  // Engine state unknown: the counts, as before.
+  CHECK(Auto5v5Decide(true, true, false, -1, 4, 5) == Auto5v5Check::Mark);
+  CHECK(Auto5v5Decide(true, true, false, -1, 5, 5) == Auto5v5Check::Done);
   // The short side: the one with fewer players, CT on a tie; 0 when both are full.
   CHECK(Auto5v5ShortSide(5, 5) == 0);
+  // An auto_5v5 pause ends by itself: both sides full for 5 s, or the time cap.
+  CHECK(Auto5v5UnpauseReason(5, 5, kAuto5v5FullHoldSeconds, 30, 300) == "full");
+  CHECK(Auto5v5UnpauseReason(5, 5, 1, 30, 300).empty());  // just back: hold on a moment
+  CHECK(Auto5v5UnpauseReason(4, 5, 0, 30, 300).empty());
+  CHECK(Auto5v5UnpauseReason(4, 5, 0, 300, 300) == "timeout");
+  CHECK(Auto5v5UnpauseReason(4, 5, 0, 9999, 0).empty());  // 0: no limit
   CHECK(Auto5v5ShortSide(4, 5) == 3);
   CHECK(Auto5v5ShortSide(5, 3) == 2);
   CHECK(Auto5v5ShortSide(4, 4) == 3);
   CHECK(Auto5v5ShortSide(2, 7) == 3);
+  // Going live: what is played and for how long, one chat message per line.
+  CHECK((GoLiveRulesLines(1, 1, "de_inferno", 16, true, 3, -1, false) ==
+         std::vector<std::string>{"Ready Up: one map: Inferno.", "Ready Up: 16 rounds, first to 9 wins.",
+                                  "Ready Up: sides switch after 8 rounds.",
+                                  "Ready Up: at 8-8, overtime: 6 rounds, first to 4, until someone wins."}));
+  CHECK((GoLiveRulesLines(2, 3, "de_nuke", 24, false, 3, -1, false) ==
+         std::vector<std::string>{"Ready Up: map 2 of 3 (first to 2 maps): Nuke.", "Ready Up: 24 rounds, first to 13 wins.",
+                                  "Ready Up: sides switch after 12 rounds.", "Ready Up: at 12-12, the map is a draw."}));
+  CHECK(GoLiveRulesLines(1, 1, "de_dust2", 24, true, 3, 2, true).back() ==
+        "Ready Up: at 12-12, overtime: 6 rounds, first to 4, at most 2, then total damage decides.");
+  // A rostered player leaving a live map: what chat says will happen.
+  CHECK(PlayerLeftChatLine("Emil", "Team Emil", false, 0) ==
+        "Ready Up: Emil (Team Emil) left the server. The match goes on; they can rejoin with the same connect link.");
+  CHECK(PlayerLeftChatLine("Emil", "Team Emil", true, 0) ==
+        "Ready Up: Emil (Team Emil) left the server. The match pauses at the next freeze time until they are back.");
+  CHECK(PlayerLeftChatLine("Emil", "Team Emil", true, 300) ==
+        "Ready Up: Emil (Team Emil) left the server. The match pauses at the next freeze time until they are back "
+        "(at most 5 min).");
   // Both teams resume it (it belongs to nobody): the pauser is ignored when both are required.
   CHECK(!UnpauseSatisfied(true, false, true, 1));
   CHECK(UnpauseSatisfied(true, true, true, 2));
@@ -129,6 +192,28 @@ static void TestForceReady() {
   CHECK(!TeamReadyToGoLive(5, 3, 3, ReadyMinPlayers(2, true)));
   CHECK(TeamReadyToGoLive(5, 5, 5, ReadyMinPlayers(2, true)));
   CHECK(!ForceReadyAllowed(3, 5, ReadyMinPlayers(2, true)));
+}
+
+static void TestTeamReady() {
+  // Off by default; the match config wins over readyup.cfg.
+  CHECK(BuiltinDefaultRules().team_ready == 0);
+  MatchRules m, base;
+  CHECK(ResolveRules(m, base).team_ready == 0);
+  base.team_ready = 1;
+  CHECK(ResolveRules(m, base).team_ready == 1);
+  m.team_ready = 0;
+  CHECK(ResolveRules(m, base).team_ready == 0);
+  // Rule off: always the player alone.
+  CHECK(DecideTeamReady(false, true, 5, 5, 0) == TeamReadyAction::Single);
+  CHECK(DecideTeamReady(false, false, 5, 5, 0) == TeamReadyAction::Single);
+  // On: the whole team once .forceready's threshold is met.
+  CHECK(DecideTeamReady(true, true, 5, 5, 0) == TeamReadyAction::Team);
+  CHECK(DecideTeamReady(true, true, 4, 5, 0) == TeamReadyAction::NotEnough);
+  CHECK(DecideTeamReady(true, true, 4, 5, 4) == TeamReadyAction::Team);
+  CHECK(DecideTeamReady(true, true, 5, 7, 0, 5) == TeamReadyAction::Team);  // substitutes
+  CHECK(DecideTeamReady(true, true, 0, 0, 0) == TeamReadyAction::NotEnough);
+  // .unready un-readies the team whoever is connected.
+  CHECK(DecideTeamReady(true, false, 1, 5, 0) == TeamReadyAction::Team);
 }
 
 static void TestTeamNames() {
@@ -270,6 +355,23 @@ static void TestWeaponCleanup() {
   }
 }
 
+static void TestTeamHudStatus() {
+  TeamHudState a = TeamHudStatus(5, 5, 5);
+  CHECK(a.ready && a.allHere && a.here == 5 && a.total == 5);
+  a = TeamHudStatus(5, 5, 1);
+  CHECK(!a.ready && a.allHere);
+  a = TeamHudStatus(5, 4, 4);
+  CHECK(!a.ready && !a.allHere && a.here == 4 && a.total == 5);
+  a = TeamHudStatus(7, 7, 5, 5);  // substitutes: 5 ready of a full team of 5
+  CHECK(a.ready && a.allHere && a.here == 5 && a.total == 5);
+  a = TeamHudStatus(7, 6, 3, 5);
+  CHECK(!a.ready && a.allHere && a.here == 5);
+  a = TeamHudStatus(0, 0, 0);
+  CHECK(!a.ready && !a.allHere && a.total == 0);
+  a = TeamHudStatus(2, 2, 2, 5);  // 2-player roster in a 5-per-team match
+  CHECK(a.ready && a.allHere && a.total == 2);
+}
+
 static void TestSpectators() {
   CHECK(BuiltinDefaultRules().min_spectators_to_ready == 0);
   MatchRules m;
@@ -309,7 +411,10 @@ int main() {
   TestSpectators();
   TestPauses();
   TestAuto5v5();
+  TestEnginePause();
   TestForceReady();
+  TestTeamReady();
+  TestTeamHudStatus();
   TestTeamNames();
   TestForfeit();
   // Warmup money top-up: scrim and match warmup only, and only when enabled.

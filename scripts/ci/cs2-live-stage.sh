@@ -20,12 +20,14 @@ cd "$(dirname "${BASH_SOURCE[0]}")/../.." || exit 1
 
 # A throwaway target for scripts/livetest: run.sh starts the CI server in tmux, the console is
 # piped into console.log (--boot). +log on as in the selftest boot: without it there are no
-# round / bot log lines (the knife winner, round ends, bots' sides).
+# round / bot log lines (the knife winner, round ends, bots' sides). -allow_round_backup_files:
+# since the October 2026 update CS2 writes round backup files only with it (csm adds it since
+# v1.27.4); the fleet test's event.backup / restore_round need them.
 t="$OUT/livetest-target"
 mkdir -p "$t"
 cat > "$t/run.sh" <<EOF
 #!/usr/bin/env bash
-exec "$CS2_CI_DIR/game/cs2.sh" -dedicated -console -usercon -port "$CS2_CI_PORT" +sv_lan 1 +sv_hibernate_when_empty 0 +log on +game_type 0 +game_mode 1 +map de_dust2
+exec "$CS2_CI_DIR/game/cs2.sh" -dedicated -console -usercon -allow_round_backup_files -port "$CS2_CI_PORT" +sv_lan 1 +sv_hibernate_when_empty 0 +log on +game_type 0 +game_mode 1 +map de_dust2
 EOF
 chmod +x "$t/run.sh"
 session="ru-ci-${GITHUB_RUN_ID}"

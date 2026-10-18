@@ -301,7 +301,7 @@ class CompatReportTest(unittest.TestCase):
             self.assertFalse((fns | slots) & set(need.get("surface") or []), pid)
 
     def test_respawn_is_core_and_never_a_hard_need(self):
-        """ru_api 1.14 player_respawn: SetPawn and the Respawn slot are the core's, optional, named by
+        """ru_api 1.16 player_respawn: SetPawn and the Respawn slot are the core's, optional, named by
         the core's feature table, and no plugin lists them in "surface"."""
         files = cr.surface_files(str(ROOT / "gamedata"))
         owner, _ = cr.ownership(files)
@@ -337,7 +337,7 @@ class CompatReportTest(unittest.TestCase):
         self.assertEqual(self.check(match, "hook_site")["total"], 1)
         self.assertEqual(self.check(match, "vtable")["passed"], 2)
         self.assertEqual(self.check(match, "schema")["status"], "pending")
-        self.assertEqual(self.check(match, "schema")["total"], 27)
+        self.assertEqual(self.check(match, "schema")["total"], 36)  # +7 optional: the round economy (round_economy.cpp); +6: ping, game rules warmup/freeze/pause (match_status.cpp)
         self.assertEqual(self.check(match, "event")["status"], "pending")
         self.assertEqual(self.check(match, "livetest")["status"], "pending")
         # whitelist needs no Host_Say (no chat commands)

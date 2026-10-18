@@ -17,10 +17,8 @@
 //   3b. Series over (no maps left, or a team clinched when clinch_series is on): a
 //       SeriesEnd event. For matches, every human is kicked after
 //       (restart_delay - 1) + ru_series_end_kick_delay_{no_demo|demo_no_upload|demo_upload}
-//       (30 s each by default, so players can read the scoreboard), but never later than
-//       kMatchEndKickMaxS (20 s) after the series end. The kick takes every human slot, admins
-//       and slots without a SteamID included. The match is unloaded (ServerReset event, mode
-//       postgame -> idle) at restart_delay + the configured delay + 1 s, after the demo flush. Scrims are not kicked; they stay in postgame until
+//       (30 s each by default, so players can read the scoreboard), and 2 s later the match is unloaded (ServerReset event, mode
+//       postgame -> idle). Scrims are not kicked; they stay in postgame until
 //       restart_delay - 1 (9 s without a demo), then unload.
 //
 // Internal events are delivered to listeners (AddMatchFlowListener) on the game thread.
@@ -45,9 +43,6 @@ namespace readyup {
 
 // ---------------------------------------------------------------------------- pure logic
 
-// Longest a human may stay on the server after a match ends, is unassigned or moves.
-constexpr double kMatchEndKickMaxS = 20;
-
 struct MapEndPlan {
   int restartDelay = 10;  // seconds until the next map / the series-end window starts
   int tvFlushDelay = 0;   // seconds until tv_stoprecord (0 = no demo)
@@ -56,8 +51,6 @@ struct MapEndPlan {
 
 MapEndPlan ComputeMapEndPlan(bool demoRecording, bool hasUploadUrl, int tvDelay, int kickExtraNoDemo,
                              int kickExtraDemoNoUpload, int kickExtraDemoUpload);
-// Seconds after the series end until every human is kicked.
-double KickDelayAfterSeriesEnd(int restartDelay, int configuredKickDelay);
 // Maps left after mapNumber (1-based) in a series of numMaps (capped by the map list).
 int RemainingMaps(int numMaps, int maplistCount, int mapNumber);
 // Over when no maps are left, or (canClinch) a team has won more than half of numMaps.
@@ -87,6 +80,8 @@ struct MatchFlowEvent {
   bool demoRecorded = false;
   bool demoUploadConfigured = false;
   stats::MapStats stats;       // MapResult
+  bool decidedByDamage = false;  // MapResult: tied after the overtimes, won on total damage
+  int team1Damage = 0, team2Damage = 0;
 };
 
 const char* MatchFlowEventTypeName(MatchFlowEventType t);
@@ -112,6 +107,9 @@ struct MapEndInput {
   std::string nextMap;       // when the series continues
   // Series over: the winner when it is not the series score's (a forfeit); empty = by score.
   std::string seriesWinner;
+  // A map tied after its overtimes and won on total damage (damage tiebreak): both teams' damage.
+  bool decidedByDamage = false;
+  int team1Damage = 0, team2Damage = 0;
 };
 
 // Game thread, called with the modes mutex held: sends the MapResult event and only

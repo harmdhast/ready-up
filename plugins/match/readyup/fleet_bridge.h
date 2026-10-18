@@ -9,7 +9,7 @@
 //     per-match sv_password, D16 scrim hand-over: chat notice, kick non-roster players after 5 s,
 //     then load), match.update (compare-and-set on config_rev), match.unassign (epoch fenced),
 //     cmd (pause, unpause, force_ready, start, restore_round, restart_map, end_match, change_map,
-//     swap_teams, kick, say, snapshot_now, exec) with exactly one cmd.result each, and
+//     swap_teams, kick, snapshot_now, exec; fleet.so runs say itself) with exactly one cmd.result each, and
 //     local.offline_timeout (D12 auto-pause) / local.connection (snapshot on connect);
 //   - keeps the canonical MatchState (§9.1): platform-owned fields from the assign config,
 //     server-owned fields from the match flow (match_status.h), live_rev + epoch; every change
@@ -45,6 +45,12 @@ bool Assigned();
 // A failover resume of a started round is waiting for its go-live in match warmup: the map score
 // at that round and whether team1 is CT in it (warmup_score.h shows it). Game thread.
 bool ResumeWarmupScore(int* team1, int* team2, bool* team1Ct);
+// A failover resume is waiting to go live (its backup not restored yet): nobody has to ready;
+// the match waits for the whole roster, then the normal ready-up (modes.cpp, match_rules.h ResumeMayGoLive).
+bool ResumeWaiting();
+// A match just ended and its players get their goodbye kick after the series-end delay: until
+// then nobody else kicks them (kick_when_no_match_loaded waits).
+bool EndedKickPending();
 // The enrolled fleet server id (fleet.so status), "" without fleet / before enrollment. Game thread.
 std::string FleetServerId();
 // The fleet MatchState (what state.snapshot / hello carry) while assigned; false otherwise.

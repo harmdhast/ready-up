@@ -43,7 +43,7 @@ extern "C" {
 #endif
 
 #define READYUP_PLUGIN_API_VERSION_MAJOR 1
-#define READYUP_PLUGIN_API_VERSION_MINOR 14
+#define READYUP_PLUGIN_API_VERSION_MINOR 16
 #define READYUP_PLUGIN_API_VERSION \
   ((uint32_t)((READYUP_PLUGIN_API_VERSION_MAJOR << 16) | READYUP_PLUGIN_API_VERSION_MINOR))
 
@@ -262,7 +262,11 @@ typedef int (*ru_admin_provider_fn)(void* user, uint64_t steamid64);
 /* ---- the function table the core hands to each plugin ------------------ */
 
 enum {
-  RU_CHAT_RAW = 1u << 0 /* do not add the Ready Up chat prefix */
+  RU_CHAT_RAW = 1u << 0, /* do not add the Ready Up chat prefix */
+  /* A line that must not be missed: gold, sent three times so it fills the chat. An older core
+   * ignores the bit (one plain line). Pair it with center_html_all_prio for the center of the
+   * screen. */
+  RU_CHAT_IMPORTANT = 1u << 1
 };
 
 /* ---- v1.2: command flags (register_chat_command_ex / register_console_command_ex) ---- */
@@ -281,6 +285,10 @@ enum {
   RU_CMD_OBSERVE = 1u << 1
 };
 
+
+/* filter_client_command (v1.14): 1 = block the command. */
+typedef int (*ru_client_command_filter_fn)(void* user, int slot, uint64_t steamid64, const char* cmd, int argc,
+                                           const char* const* argv);
 
 typedef struct ru_api {
   uint32_t struct_size;
@@ -693,7 +701,7 @@ typedef struct ru_api {
    * ("not available on this CS2 build"). A refused call logs why.
    */
   /* 1 if `feature` works on this build: "change_team" (player_change_team), "teleport"
-   * (player_teleport), "entity_create" (entity_create + entity_spawn), "respawn" (1.14
+   * (player_teleport), "entity_create" (entity_create + entity_spawn), "respawn" (1.16
    * player_respawn). 0 otherwise. Game thread. */
   int (*engine_feature_available)(ru_plugin* self, const char* feature);
   /* The player in `slot` joins `team` (RU_TEAM_SPECTATOR / _T / _CT) through
@@ -714,8 +722,23 @@ typedef struct ru_api {
    * 0 = refused (not a live entity, a controller) or unavailable. Game thread. */
   int (*entity_spawn)(ru_plugin* self, void* entity);
 
-  /* ==== v1.14 ===========================================================
-   * Appended in 1.14. Require 1.14 in ru_plugin_info.api_version, or check RU_API_HAS().
+  /* -- v1.14 -- */
+  /* Decide whether a player's console command `cmd` (e.g. "jointeam", sent by the team menu too)
+   * runs: fn returns 1 to block it (the command never reaches the game), 0 to let it through.
+   * argv[0] is the command. steamid64 0 = not known yet. Game thread, synchronous: keep it quick
+   * and do not call back into blocking APIs. Returns 0 on failure. */
+  ru_handle (*filter_client_command)(ru_plugin* self, const char* cmd, ru_client_command_filter_fn fn, void* user);
+  /* ==== v1.15 ===========================================================
+   * Appended in 1.15. Require 1.15 in ru_plugin_info.api_version, or check RU_API_HAS().
+   */
+  /* Why a new match must not be loaded, when the server's paid Auto Tournament license has
+   * stopped (unpaid past its grace, its key replaced by a new one a day ago, or the key in use on
+   * another Auto Tournament install). Returns the message's length (truncated to len-1 in buf),
+   * or -1 when matches may be loaded (always, without a key or with a key that doesn't verify).
+   * Running matches are never stopped. Any thread. */
+  int (*license_stopped)(ru_plugin* self, char* buf, uint32_t len);
+  /* ==== v1.16 ===========================================================
+   * Appended in 1.16. Require 1.16 in ru_plugin_info.api_version, or check RU_API_HAS().
    */
   /* Respawns the dead player in `slot` (on T or CT) on their player pawn through
    * CBasePlayerController::SetPawn + CCSPlayerController::Respawn, from the core gamedata (vtable
@@ -723,7 +746,7 @@ typedef struct ru_api {
    * slot, not on T / CT, no pawn) or unavailable (engine_feature_available "respawn"). Game thread. */
   int (*player_respawn)(ru_plugin* self, int slot);
 
-  /* v1.15+: fields are appended here. Check RU_API_HAS() before use. */
+  /* v1.16+: fields are appended here. Check RU_API_HAS() before use. */
 } ru_api;
 
 /* ---- what a plugin exports --------------------------------------------- */

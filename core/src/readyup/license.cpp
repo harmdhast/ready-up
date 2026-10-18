@@ -103,7 +103,7 @@ std::string PayloadProblem(const mj::Value& p) {
       ms->num > 9007199254740991.0) {
     return "bad max_servers";
   }
-  if (!OneOf(p.get("kind"), {"event", "year", "founder"})) return "bad kind";
+  if (!OneOf(p.get("kind"), {"month", "event", "year", "founder"})) return "bad kind";
   const mj::Value* issued = p.get("issued_at");
   if (!mj::IsString(issued) || !IsIsoTimestamp(issued->str)) return "bad issued_at";
   const mj::Value* uu = p.get("updates_until");
@@ -117,6 +117,8 @@ std::string PayloadProblem(const mj::Value& p) {
   }
   const mj::Value* lic = p.get("licensee");
   if (lic != nullptr && !mj::IsString(lic)) return "bad licensee";
+  const mj::Value* lease = p.get("lease");
+  if (lease != nullptr && lease->type != mj::Value::Type::Bool) return "bad lease";
   return {};
 }
 
@@ -266,6 +268,8 @@ Result Verify(const std::string& token, const Options& opts) {
   p.updates_until = Str(payload, "updates_until");
   p.valid_from = Str(payload, "valid_from");
   p.valid_to = Str(payload, "valid_to");
+  const mj::Value* lease = payload.get("lease");
+  p.lease = lease != nullptr && lease->type == mj::Value::Type::Bool && lease->b;
 
   // Founder keys carry updates_until 9999-12-31; covered whatever the line date.
   if (p.kind != "founder" && !opts.line_date.empty() && opts.line_date > p.updates_until) {
@@ -298,6 +302,8 @@ std::string ConsoleLine(const Result& r) {
   std::string kind;
   if (p.kind == "event") {
     kind = p.valid_from == p.valid_to ? "event " + p.valid_to : "event " + p.valid_from + " to " + p.valid_to;
+  } else if (p.kind == "month") {
+    kind = "monthly, paid until " + p.updates_until;
   } else if (p.kind == "year") {
     kind = "yearly, updates until " + p.updates_until;
   } else {
@@ -316,6 +322,81 @@ std::string PlayerLine(const Result& r) {
   const std::string licensee = Printable(r.license.licensee);
   if (licensee.empty()) return {};
   return "Licensed to " + licensee;
+}
+
+std::string AddDays(const std::string& day, int days) {
+  if (!IsDate(day)) return {};
+  std::tm t{};
+  t.tm_year = std::stoi(day.substr(0, 4)) - 1900;
+  t.tm_mon = std::stoi(day.substr(5, 2)) - 1;
+  t.tm_mday = std::stoi(day.substr(8, 2)) + days;
+  t.tm_hour = 12;
+  const time_t at = timegm(&t);
+  std::tm out{};
+  gmtime_r(&at, &out);
+  char buf[16];
+  std::snprintf(buf, sizeof(buf), "%04d-%02d-%02d", out.tm_year + 1900, out.tm_mon + 1, out.tm_mday);
+  return buf;
+}
+
+Standing StandingFor(const std::string& key, const std::string& lease, const std::string& state,
+                     const std::string& state_stops_on, const std::string& today,
+                     const std::vector<PublicKey>* keys) {
+  Standing st;
+  if (key.empty()) return st;
+  Options o;
+  o.today = today;
+  o.keys = keys;
+  const Result k = Verify(key, o);
+  if (!k.valid() || k.license.lease) {
+    st.status = "invalid";
+    return st;
+  }
+  Payload p = k.license;
+  if (!lease.empty()) {
+    const Result l = Verify(lease, o);
+    if (l.valid() && l.license.lease && l.license.id == p.id && l.license.kind == p.kind && l.license.issued_at >= p.issued_at) {
+      p = l.license;
+    }
+  }
+  st.paid = true;
+  st.status = "active";
+  st.max_servers = p.max_servers;
+
+  if (state == "in_use_elsewhere") {
+    st.status = "expired";
+    st.reason = "in_use_elsewhere";
+    st.stops_on = state_stops_on;
+    return st;
+  }
+  if (state == "replaced") {
+    st.reason = "replaced";
+    st.stops_on = state_stops_on;
+    st.status = (state_stops_on.empty() || today >= state_stops_on) ? "expired" : "past_due";
+    return st;
+  }
+  if (state == "revoked") {
+    return Standing{false, "invalid", "", "", 0};
+  }
+  if (p.kind == "month") {
+    // Works through the 14th day after the last paid day; stops on the 15th.
+    const std::string stops = AddDays(p.updates_until, kGraceDays + 1);
+    if (!stops.empty() && today >= stops) {
+      st.status = "expired";
+      st.stops_on = stops;
+    } else if (today > p.updates_until) {
+      st.status = "past_due";
+      st.stops_on = stops;
+    }
+  }
+  // The license server can only make it stricter (a renewal arrives as a lease).
+  auto rank = [](const std::string& s) { return s == "expired" ? 2 : s == "past_due" ? 1 : 0; };
+  if ((state == "past_due" || state == "expired") && rank(state) > rank(st.status)) {
+    st.status = state;
+    if (!state_stops_on.empty()) st.stops_on = state_stops_on;
+  }
+  if (st.status != "active") st.reason = "unpaid";
+  return st;
 }
 
 }  // namespace readyup::license

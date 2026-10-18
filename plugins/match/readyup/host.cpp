@@ -170,6 +170,30 @@ void SendToChat(const char* msg) {
   });
 }
 
+void SendImportantToChat(const char* msg, int centerSeconds) {
+  if (!msg || !*msg) return;
+  host::RunOnGameThread([m = std::string(msg), centerSeconds] {
+    const ru_api* a = host::Api();
+    if (!a) return;
+    a->chat_all(a->self, m.c_str(), RU_CHAT_IMPORTANT);
+    if (centerSeconds <= 0) return;
+    // Plain text in the center panel: the chat's "Ready Up: " lead-in is not needed there.
+    std::string text = m.rfind("Ready Up: ", 0) == 0 ? m.substr(10) : m;
+    std::string esc;
+    for (char ch : text) {
+      if (ch == '&') esc += "&amp;";
+      else if (ch == '<') esc += "&lt;";
+      else if (ch == '>') esc += "&gt;";
+      else esc.push_back(ch);
+    }
+    const std::string html = "<font color='#FFD700'>" + esc + "</font>";
+    if (RU_API_HAS(a, center_html_all_prio) && a->center_html_all_prio)
+      a->center_html_all_prio(a->self, html.c_str(), centerSeconds, RU_HTML_PRIO_ALERT);
+    else
+      a->center_html_all(a->self, html.c_str(), centerSeconds);
+  });
+}
+
 void SendRawToChat(const char* payload) {
   if (!payload || !*payload) return;
   host::RunOnGameThread([m = std::string(payload)] {
@@ -236,7 +260,9 @@ bool ForceJoinTeamForSlot(int slot, int joinTeam) {
   const ru_api* a = host::Api();
   if (!a || !host::OnGameThread() || slot < 0 || !RU_API_HAS(a, player_change_team) || !a->player_change_team) return false;
   const int team = joinTeam == 3 ? RU_TEAM_CT : joinTeam == 2 ? RU_TEAM_T : RU_TEAM_SPECTATOR;
-  return a->player_change_team(a->self, slot, team) == 1;
+  const bool ok = a->player_change_team(a->self, slot, team) == 1;
+  if (ok) PlayersInvalidate();  // the move landed: the next ListHumans() reads the new team
+  return ok;
 }
 
 bool RespawnAvailable() {
@@ -370,12 +396,20 @@ PlayersView ReadPlayers() {
   return v;
 }
 
+// Game thread: the view is read from the engine once per frame (FrameBegin) and again only after a
+// player connects, leaves or changes team (PlayersInvalidate). Every ListHumans() / ListBots() used
+// to walk the engine's players again, dozens of times per tick (2026-10-15: most of the match
+// plugin's per-tick cost).
+bool g_playersStale = true;  // game thread only
+
 PlayersView Players() {
   if (host::OnGameThread() && host::Api()) {
-    PlayersView v = ReadPlayers();
-    std::lock_guard<std::mutex> lk(g_playersMu);
-    g_players = v;
-    return v;
+    if (g_playersStale) {
+      PlayersView v = ReadPlayers();
+      std::lock_guard<std::mutex> lk(g_playersMu);
+      g_players = std::move(v);
+      g_playersStale = false;
+    }
   }
   std::lock_guard<std::mutex> lk(g_playersMu);
   return g_players;
@@ -383,7 +417,14 @@ PlayersView Players() {
 
 }  // namespace
 
-void PlayersRefreshCache() { (void)Players(); }
+void PlayersRefreshCache() {
+  g_playersStale = true;
+  (void)Players();
+}
+
+void PlayersInvalidate() {
+  if (host::OnGameThread()) g_playersStale = true;
+}
 
 std::vector<HumanIdentity> ListHumans() { return Players().humans; }
 

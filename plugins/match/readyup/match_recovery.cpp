@@ -50,6 +50,11 @@ void SetMapNumber(int mapNumber) {
 void RestoreLiveMap() {
   const auto ctx = WebhookGetMatchContext();
   if (!ctx) return;
+  // The platform assigned (or resumes) the match since Step looked: it restores it, not us.
+  if (fleet_bridge::Assigned() || fleet_bridge::ResumeWaiting()) {
+    Print("recovery: the platform resumes the match; local recovery stands down\n");
+    return;
+  }
   const int mapNumber = g_plan.map_number;
   // A restart reset these (match load / go-live set them).
   round_restore::EnableRoundBackups(ctx->matchid, mapNumber);

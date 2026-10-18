@@ -40,7 +40,10 @@ int ItemInitializedOffset();  // CEconItemView::m_bInitialized (may be -1)
 
 // Writes paint/seed/wear/StatTrak/nametag + a fake item ID onto a CEconItemView (and the fallback
 // fields of `ownerEconEntity` if non-null).
-void WritePaint(void* ownerEconEntity, void* itemView, uint64_t steamid64, const WeaponSkinEntry& skin);
+// Returns the item ID written.
+uint64_t WritePaint(void* ownerEconEntity, void* itemView, uint64_t steamid64, const WeaponSkinEntry& skin);
+// CEconItemView::m_iItemID now.
+uint64_t ItemIdOf(void* itemView);
 
 void* EconItemViewOfWeapon(void* weapon);
 

@@ -115,6 +115,7 @@ Table `match_live_state (match_id, epoch, server_id, live_rev, config_rev, state
 | `event.demo` | turnover (`utils/serverTurnover.ts`); the demo itself streams over the link (`demo.*`, FLEET.md §12.2) |
 | `event.forfeit` / `event.gg` | admin notification / result proposal |
 | `event.admin_called {call_id, player, message, called_at}` | a player typed `.admin [message]`: notify admins, resolve on the platform (same fields as the `admin_called` webhook, docs/ADMINS.md) |
+| `event.chat {player, message, team_only, at}` | a player's chat line (not a command), for the admin match view; at most 5 lines per player per 5 s |
 | `event.backup` | backup store (section 7) |
 
 Bots: player ids in the dev-bot range (`PlayerLine.bot = true`) are dropped unless the match is a

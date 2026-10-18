@@ -81,6 +81,7 @@ void SendToChat(const char* msg) {
   g_chat.push_back(msg);
 }
 void SendRawToChat(const char* msg) { SendToChat(msg); }
+void SendImportantToChat(const char* msg) { SendToChat(msg); }
 bool ClientPrintChat(int, const char* msg) {
   SendToChat(msg);
   return true;
@@ -549,7 +550,7 @@ int main(int argc, char** argv) {
     rp::TryDispatchChat(76561198000000001ull, "alice", ".help", 2);
     rp::Frame(true);
     Check(Sent("changelevel de_other"), "admin: .ru map change de_other -> changelevel");
-    Check(Chatted("Ready Up admin: .ru help"), "admin: .help points at .ru help");
+    Check(Chatted(".ru help  admin commands"), "admin: .help points at .ru help");
     Check(!Chatted("Licensed to"), ".help: no license line by default");
     readyup::g_showLicense = true;
     ClearLog();
@@ -699,6 +700,7 @@ int main(int argc, char** argv) {
   // CS2 credits a round before it calls TerminateRound, which match warmup drops: a win condition
   // that holds (the round timer at 0:00 once the warmup cvars are gone) scores on every tick.
   Check(FramesUntil([] { return Sent("mp_roundtime 7"); }, 2000), "match warmup rules applied");
+  Check(Sent("mp_teamname_1 \"Alpha\""), "match warmup without cfg exec: the team names go out");
   Check(!Sent("sv_cheats 1") && !Sent("sv_infinite_ammo 2"), "warmup infinite ammo without sv_cheats");
   ClearCmds();
   g_teamsUp = true;
@@ -761,6 +763,7 @@ int main(int argc, char** argv) {
   Check(CountLogged("ready: could not move bob to T") == 1, "the refusal is reported once, not every retry");
   Check(!Logged("ready: moved bob"), "a refused move is not logged as moved");
   g_refuseTeamChange = false;
+  g_players.back().team = 1;  // a team event arrives: the retry cap (team_lock.h) starts over
   Check(FramesUntil([] { return Logged("ready: moved bob to T"); }, 3000), "the retry lands");
   (void)FramesUntil([] { return false; }, 2000);
   Check(CountLogged("ready: moved bob to T") == 1, "a landed move is logged once");
@@ -776,6 +779,7 @@ int main(int argc, char** argv) {
   Check(!FramesUntil([&] { return Sent("mp_restartgame 1") || respawned(3); }, 3000),
         "a refused move neither respawns nor restarts the warmup round");
   g_refuseTeamChange = false;
+  g_players.back().team = 1;  // a team event arrives: the retry cap (team_lock.h) starts over
   ClearLog();
   Check(FramesUntil([] { return Logged("ready: moved bob to T"); }, 6000), "bob on no team is moved to his side");
   Check(FramesUntil([&] { return respawned(3); }, 3000), "the forced move respawns bob");

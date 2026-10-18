@@ -50,7 +50,7 @@ static void TestGoLiveCard() {
   for (const char* cmd : {".p<", ".up<", ".tac<", ".admin<"}) CHECK(Has(h, cmd));
   // Short forms only.
   for (const char* cmd : {".pause<", ".tech<", ".unpause<"}) CHECK(!Has(h, cmd));
-  CHECK(GoLiveCommandsLine(m, false) == ".p pause | .up resume | .tac timeout | .admin help");
+  CHECK(GoLiveCommandsLine(m, false) == "Pause: .p | Unpause: .up | Timeout: .tac | Call an admin: .admin");
   CHECK(h.size() < 1024);
 
   // Long names are cut: the card stays small.
@@ -230,8 +230,46 @@ static void TestPayload() {
   CHECK(AdminCallTeamLabel("", "", false).empty());
 }
 
+static void TestResultCards() {
+  ResultCardInfo m;
+  m.team1 = "Alpha";
+  m.team2 = "Bravo <x>";
+  m.winner = "team2";
+  m.team1Score = 5;
+  m.team2Score = 7;
+  m.mapNumber = 2;
+  m.mapName = "de_mirage";
+  m.nextMap = "de_inferno";
+  const std::string map = MapResultCardHtml(m);
+  CHECK(Has(map, "MAP 2 &#183; Mirage"));
+  CHECK(Has(map, "<b>Bravo &lt;x&gt;</b>") && Has(map, " wins the map"));
+  CHECK(Has(map, "<b>5 - 7</b>") && Has(map, "Next: Inferno"));
+  CHECK(map.size() < 1024);
+
+  m.winner = "";
+  m.nextMap = "";
+  CHECK(Has(MapResultCardHtml(m), "MAP DRAWN") && !Has(MapResultCardHtml(m), "Next:"));
+
+  ResultCardInfo s;
+  s.team1 = "Alpha";
+  s.team2 = "Bravo";
+  s.winner = "team1";
+  s.team1Score = 2;
+  s.team2Score = 1;
+  const std::string series = SeriesResultCardHtml(s);
+  CHECK(Has(series, "<b>Alpha</b>") && Has(series, "WINS THE SERIES") && Has(series, "<b>2 - 1</b>"));
+  s.forfeit = true;
+  CHECK(Has(SeriesResultCardHtml(s), "by forfeit"));
+  s.winner = "";
+  CHECK(Has(SeriesResultCardHtml(s), "SERIES DRAWN"));
+  ResultCardInfo blank;
+  blank.winner = "team1";
+  CHECK(Has(SeriesResultCardHtml(blank), "<b>Team 1</b>"));
+}
+
 int main() {
   TestEscape();
+  TestResultCards();
   TestGoLiveCard();
   TestGoLiveCardTiming();
   TestAdminCard();

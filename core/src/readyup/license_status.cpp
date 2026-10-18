@@ -22,6 +22,8 @@ constexpr const char* kAcceptCfgFile = "ReadyUp/license.cfg";  // install.sh wri
 struct State {
   std::mutex mu;
   std::optional<std::string> consoleKey;  // last readyup_license_key value seen (may be "")
+  std::optional<std::string> consoleLease;  // last readyup_license_lease value seen
+  std::optional<std::string> consoleState;  // last readyup_license_state value seen
   bool show = false;                      // readyup_show_license
   std::string lastLogged;                 // key whose status line was printed last
   bool noKeyLogged = false;
@@ -146,6 +148,32 @@ KeySource FindKeyLocked(State& s) {
   return {k, CfgFilePath()};
 }
 
+// The lease / state: the console setting when seen, else readyup_license.cfg.
+std::string LeaseLocked(State& s) { return s.consoleLease ? *s.consoleLease : SettingFromFile(CfgFilePath(), kLeaseSetting); }
+std::string StateLocked(State& s) { return s.consoleState ? *s.consoleState : SettingFromFile(CfgFilePath(), kStateSetting); }
+
+Standing StandingLocked(State& s) {
+  const std::string state = StateLocked(s);
+  const size_t sp = state.find(' ');
+  const std::string status = sp == std::string::npos ? state : state.substr(0, sp);
+  const std::string stops = sp == std::string::npos ? std::string() : TrimWs(state.substr(sp + 1));
+  return StandingFor(FindKeyLocked(s).key, LeaseLocked(s), status, IsDate(stops) ? stops : std::string(), TodayUtc());
+}
+
+std::string StoppedText(const Standing& st) {
+  if (!st.paid || st.status != "expired") return {};
+  if (st.reason == "in_use_elsewhere") {
+    return "Match not loaded: this license key is in use on another Auto Tournament install. Use \"Move to another "
+           "install\" in the console (console.autotournament.gg), or set this server's own key.";
+  }
+  if (st.reason == "replaced") {
+    return "Match not loaded: this license key was replaced by a new one in the console. Set the new key "
+           "(csm license set, or the platform's license settings).";
+  }
+  return "Match not loaded: the Auto Tournament license has expired because it wasn't paid. Pay it at "
+         "console.autotournament.gg/billing; matches load again right away.";
+}
+
 Result Check(const std::string& key) {
   Options o;
   o.line_date = LineDate();
@@ -164,6 +192,12 @@ void LogKeyLocked(State& s, const std::string& key, bool force) {
 }  // namespace
 
 const char* LineDate() { return READYUP_LINE_DATE; }
+
+std::string StoppedMessage() {
+  State& s = S();
+  std::lock_guard<std::mutex> lk(s.mu);
+  return StoppedText(StandingLocked(s));
+}
 
 void LogAtLoad() {
   State& s = S();
@@ -231,6 +265,29 @@ bool HandleConsoleLine(const std::string& line) {
     LogKeyLocked(s, value, /*force=*/false);
     return true;
   }
+  if (ParseSetting(line, kLeaseSetting, &hasValue, &value)) {
+    std::lock_guard<std::mutex> lk(s.mu);
+    if (hasValue) s.consoleLease = value;
+    else Print("%s is %s\n", kLeaseSetting, LeaseLocked(s).empty() ? "not set" : "set");
+    return true;
+  }
+  if (ParseSetting(line, kStateSetting, &hasValue, &value)) {
+    std::lock_guard<std::mutex> lk(s.mu);
+    if (hasValue) {
+      // `readyup_license_state "replaced 2026-10-11"`: keep both words.
+      bool quoted = false;
+      std::string raw = TrimWs(line.substr(std::string(kStateSetting).size()));
+      if (!raw.empty() && raw[0] == '"') {
+        const size_t close = raw.find('"', 1);
+        raw = raw.substr(1, close == std::string::npos ? std::string::npos : close - 1);
+        quoted = true;
+      }
+      s.consoleState = quoted ? TrimWs(raw) : value;
+    } else {
+      Print("%s \"%s\"\n", kStateSetting, Printable(StateLocked(s), 64).c_str());
+    }
+    return true;
+  }
   if (ParseSetting(line, kAcceptedSetting, &hasValue, &value)) {
     std::lock_guard<std::mutex> lk(s.mu);
     if (hasValue) {
@@ -275,6 +332,15 @@ std::vector<std::string> StatusLines() {
   }
   const Result r = Check(src.key);
   std::vector<std::string> out = {ConsoleLine(r), "key from " + src.origin + "; " + line};
+  const Standing st = StandingLocked(s);
+  if (st.paid) {
+    std::string l = "paid license: " + st.status + (st.reason.empty() ? "" : " (" + st.reason + ")") +
+                    ", covers " + std::to_string(st.max_servers) + " servers";
+    if (!st.stops_on.empty()) l += ", stops " + st.stops_on;
+    out.push_back(l);
+    const std::string stopped = StoppedText(st);
+    if (!stopped.empty()) out.push_back(stopped);
+  }
   if (!r.valid() && !r.issues.empty()) out.push_back("reason: " + r.issues.front().code);
   const std::string player = PlayerLine(r);
   if (!s.show) {

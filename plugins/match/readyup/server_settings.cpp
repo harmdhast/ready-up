@@ -56,6 +56,8 @@ const std::vector<SettingInfo>& Table() {
        "Ready Up's chat prefix, <Color> tokens (empty = readyup.cfg chat_prefix)"},
       {"admin_chat_prefix", Kind::Str, "", 0, 64, "admin_prefix", nullptr,
        "chat name prefix of admins, <Color> tokens (empty = [Admin])"},
+      {"roster_names_enabled", Kind::Bool, "1", 0, 1, nullptr, nullptr,
+       "roster players play under their match roster names (match `roster_names` wins)"},
   };
   return k;
 }

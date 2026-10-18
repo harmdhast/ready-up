@@ -204,6 +204,13 @@ int main() {
   CHECK(back.Count() == 1 && back.Find("1", "ok") && skipped == 4);
   CHECK(book.Remove("7656", "window") && !book.Remove("7656", "window") && book.Count() == 1);
 
+  CHECK(ValidHomeCvar("sv_airaccelerate 150") && ValidHomeCvar("sv_staminajumpcost 0") &&
+        ValidHomeCvar("mp_roundtime 60") && ValidHomeCvar("sv_gravity 800.5") && ValidHomeCvar("sv_x -1"));
+  for (const char* bad : {"", "sv_cheats", "quit 1", "sv_a 1; quit", "sv_a 1 2", "rcon_password 1", "sv_A 1",
+                          "sv_a x", "sv_a 1.2.3", "mp_ 1"}) {
+    CHECK(!ValidHomeCvar(bad));
+  }
+
   std::printf("practice_rules_test: %s\n", g_failures ? "FAIL" : "PASS");
   return g_failures ? 1 : 0;
 }

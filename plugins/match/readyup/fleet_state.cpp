@@ -1,5 +1,6 @@
 #include "readyup/fleet_state.h"
 
+#include "readyup/broadcast_profile.h"
 #include "readyup/map_names.h"
 #include "readyup/ruleset.h"
 
@@ -57,6 +58,18 @@ bool LiveStream::Advance(const Json& next, bool force, Json* patch, long long* r
   }
   state_ = std::move(n);
   if (patch) *patch = std::move(p);
+  if (rev) *rev = rev_;
+  return true;
+}
+
+bool LiveStream::BumpRevOnly(Json* patch, long long* rev) {
+  if (!state_.IsObject()) return false;
+  ++rev_;
+  state_["live_rev"] = rev_;
+  if (patch) {
+    *patch = Json::Object();
+    (*patch)["live_rev"] = rev_;
+  }
   if (rev) *rev = rev_;
   return true;
 }
@@ -318,6 +331,9 @@ bool ValidateAssign(const Json& payload, std::string* err) {
     }
   }
   if (!ValidateRuleset(*cfg, err)) return false;
+  // rules.broadcast (the tv plugin's GOTV profile, docs/design/tv-plugin.md): the same validator
+  // tv.so uses, so a bad block refuses the whole assign instead of being half applied.
+  if (std::string why; !broadcast::ValidateAssignConfigText(cfg->Dump(), &why)) return fail(why);
   return true;
 }
 
@@ -468,6 +484,7 @@ Json AssignToMatConfig(const std::string& matchId, const Json& config, std::vect
   if (pause && pause->Find("pause_after_restore")) cfg["pause_after_restore"] = Bool(*pause, "pause_after_restore", true);
   if (const Json* ready = Obj(r, "ready")) {
     if (ready->Find("allow_force_ready")) cfg["allow_force_ready"] = Bool(*ready, "allow_force_ready", true);
+    if (ready->Find("team_ready")) cfg["team_ready"] = Bool(*ready, "team_ready", false);
     if (ready->Find("min_per_team")) cfg["min_players_to_ready"] = Int(*ready, "min_per_team", 0);
     if (ready->Find("autoready")) cfg["autoready"] = Bool(*ready, "autoready", false);
   }
@@ -478,6 +495,8 @@ Json AssignToMatConfig(const std::string& matchId, const Json& config, std::vect
   // Server settings the match sets for itself (server_settings.h); absent = the server's value.
   if (r.Find("playout")) cfg["playout"] = Bool(r, "playout", false);
   if (r.Find("whitelist")) cfg["whitelist"] = Bool(r, "whitelist", true);
+  // In-game names from the roster (roster_names.h); absent = on when players have names.
+  if (r.Find("roster_names")) cfg["roster_names"] = Bool(r, "roster_names", true);
   if (const Json* ff = Obj(r, "forfeit"); ff && ff->Find("team_absent_seconds")) {
     cfg["forfeit_after_seconds"] = Int(*ff, "team_absent_seconds", 240);
   }

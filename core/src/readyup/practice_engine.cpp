@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <optional>
 
 namespace readyup::practice_engine {
 namespace {
@@ -62,6 +63,18 @@ bool ChangeTeam(int slot, int team, std::string* why) {
   using Fn = void (*)(void*, int);
   reinterpret_cast<Fn>(fn)(ctrl, team);
   return true;
+}
+
+int TeamOf(int slot) {
+  void* ctrl = Controller(slot);
+  if (!ctrl) return -1;
+  // Resolved once (and again only while the schema does not have it yet).
+  static std::optional<int> off;
+  if (!off) off = SchemaFindOffset("server", "CCSPlayerController", "m_iTeamNum");
+  if (!off) return -1;
+  // A byte (ChangeTeam itself reads it with `movzx r14d, byte [rdi+m_iTeamNum]`).
+  const int team = static_cast<const unsigned char*>(ctrl)[*off];
+  return team <= 3 ? team : -1;
 }
 
 bool Teleport(int slot, const float* origin, const float* angles, const float* velocity, std::string* why) {

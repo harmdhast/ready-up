@@ -33,6 +33,10 @@ bool GameEventsListenerInstalled();
 // Team of a player slot (2 = T, 3 = CT): the controller's m_iTeamNum when engine events are
 // live, else the log-derived team. Game thread.
 std::optional<int> GetCsTeamNumForSlot(int slot);
+// The engine's team of a player slot right now: the controller's m_iTeamNum (0 none, 1 spectators,
+// 2 T, 3 CT), read as the byte it is. nullopt off the game thread, without a controller or before
+// the schema is known. Not the core's cached team, which a map load resets to 0 (team_lock.h).
+std::optional<int> EngineTeamForSlot(int slot);
 
 // Total roster-team damage on the current map, {team1, team2} (player_hurt dmg_health).
 std::pair<int, int> GetRosterTeamDamageTotals();

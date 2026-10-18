@@ -198,6 +198,38 @@ static void TestStatsSidesAndGate() {
 
 // Plugin reload: ToJson(MapStats) -> FromJson -> Restore continues the map with the same
 // totals, sides and round list.
+// Round economy (round_economy.h): money at the start and the buys go into the round's player
+// rows and survive the JSON round trip; a row without them stays as it was.
+static void TestStatsEconomy() {
+  stats::StatsAccumulator st;
+  st.BeginMap(/*team1IsCt=*/true);
+  st.OnRoundStart();
+  ObserveAll(st, 3);
+  st.SetMoneyStart(A1, 4750);
+  st.SetLoadout(A1, 150, 100, true, false, {"m4a1", "smokegrenade"});
+  st.OnRoundEnd(3, 8);
+  const auto m = st.Snapshot();
+  CHECK(m.rounds.size() == 1);
+  const stats::PlayerRound* a1 = nullptr;
+  const stats::PlayerRound* b1 = nullptr;
+  for (const auto& p : m.rounds[0].players) {
+    if (p.id == A1) a1 = &p;
+    if (p.id == B1) b1 = &p;
+  }
+  CHECK(a1 && a1->money_start == 4750 && a1->money_after_buy == 150 && a1->armor == 100 && a1->helmet &&
+        !a1->defuser && a1->loadout.size() == 2 && a1->loadout[0] == "m4a1");
+  CHECK(b1 && b1->money_start == -1);
+  const std::string json = stats::ToJson(m);
+  CHECK(json.find("\"money_start\":4750") != std::string::npos);
+  CHECK(json.find("\"loadout\":[\"m4a1\",\"smokegrenade\"]") != std::string::npos);
+  stats::MapStats back;
+  CHECK(stats::FromJson(json, &back));
+  const stats::PlayerRound* a1b = nullptr;
+  for (const auto& p : back.rounds[0].players)
+    if (p.id == A1) a1b = &p;
+  CHECK(a1b && a1b->money_start == 4750 && a1b->loadout.size() == 2 && a1b->helmet);
+}
+
 static void TestStatsRestore() {
   stats::StatsAccumulator st;
   st.BeginMap(/*team1IsCt=*/true);
@@ -246,15 +278,6 @@ static void TestMapEndPlan() {
   CHECK_EQ(p.kickDelay, 94);
   p = ComputeMapEndPlan(true, true, 120, 5, 10, 60);
   CHECK_EQ(p.tvFlushDelay, 135);
-}
-
-static void TestKickDelayAfterSeriesEnd() {
-  CHECK_EQ(KickDelayAfterSeriesEnd(10, 0), 9.0);
-  CHECK_EQ(KickDelayAfterSeriesEnd(10, 5), 14.0);
-  CHECK_EQ(KickDelayAfterSeriesEnd(10, 30), kMatchEndKickMaxS);
-  CHECK_EQ(KickDelayAfterSeriesEnd(35, 30), kMatchEndKickMaxS);
-  CHECK_EQ(KickDelayAfterSeriesEnd(135, 0), kMatchEndKickMaxS);
-  CHECK_EQ(KickDelayAfterSeriesEnd(1, -5), 0.0);
 }
 
 static void TestSeriesOver() {
@@ -707,9 +730,9 @@ int main() {
   TestUploadWanted();
   TestStatsRound1();
   TestStatsSidesAndGate();
+  TestStatsEconomy();
   TestStatsRestore();
   TestMapEndPlan();
-  TestKickDelayAfterSeriesEnd();
   TestSeriesOver();
   TestDemoNaming();
   TestMatchFlowEventJson();

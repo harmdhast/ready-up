@@ -104,7 +104,7 @@ void MaybeMarkHalftimePause() {
   if (GetMode() != ReadyUpMode::MatchLive || PauseStateGet().paused) return;
   PauseStateOnPaused("halftime", "server");
   Print("pause: halftime (mp_halftime_pausematch 1): both teams .unpause, or an admin\n");
-  SendToChat("Ready Up: halftime pause. Both teams type .unpause to start the second half.");
+  SendToChat("Ready Up: halftime pause. To start the second half, both teams type .up.");
 }
 
 // ---- GOTV on this map (game thread; read from any thread) ------------------------------------

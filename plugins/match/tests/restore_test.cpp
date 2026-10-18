@@ -115,6 +115,24 @@ static void TestRestoreCommand() {
   CHECK(!RestoreRefusal(c).empty());
 }
 
+static void TestBackupFlagHint() {
+  const std::string hint = BackupFlagHint();
+  CHECK(hint.find("-allow_round_backup_files") != std::string::npos);
+  CHECK(hint.find("csm 1.27.4+") != std::string::npos && hint.find("restart the server") != std::string::npos);
+  const std::string missing = "no backup readyup_backup_4242_map1_round04.txt";
+  CHECK(ExplainRestoreError(missing) == missing + ". " + hint);
+  CHECK(ExplainRestoreError("no match loaded") == "no match loaded");
+  CHECK(ExplainRestoreError("round must be >= 1") == "round must be >= 1");
+
+  const auto has = [](const std::string& raw) { return CmdlineHasArg(raw, kRoundBackupFlag); };
+  const std::string nul(1, '\0');
+  CHECK(has("/srv/cs2" + nul + "-dedicated" + nul + "-allow_round_backup_files" + nul + "+map" + nul));
+  CHECK(has("cs2" + nul + "-allow_round_backup_files"));  // last arg, no trailing NUL
+  CHECK(!has("cs2" + nul + "-dedicated" + nul));
+  CHECK(!has("cs2" + nul + "-allow_round_backup_files_x" + nul));
+  CHECK(!has(""));
+}
+
 static void TestPauseAfterRestore() {
   CHECK(PauseAfterRestoreFor(-1, -1, -1) == 1);  // default on
   CHECK(PauseAfterRestoreFor(-1, -1, 0) == 0);   // readyup.cfg
@@ -233,6 +251,7 @@ int main() {
   TestFileNames();
   TestList();
   TestRestoreCommand();
+  TestBackupFlagHint();
   TestPauseAfterRestore();
   TestProgress();
   TestPlanRecovery();

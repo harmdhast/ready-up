@@ -278,6 +278,23 @@ if (!RU_API_HAS(api, grenade_spawn_available) || !api->grenade_spawn_available(a
 }
 ```
 
+### v1.15 (implemented)
+
+The license standing for new matches.
+
+| Member | Thread | Purpose |
+|---|---|---|
+| `license_stopped(self, buf, len)` | any | Why a new match must not be loaded while the server's paid license has stopped (unpaid past its grace, its key replaced a day ago, or in use on another install); -1 when matches may load. Running matches are never stopped. The match plugin refuses URL loads and fleet assigns while it answers |
+
+### v1.14 (implemented)
+
+Client command filters. The core's `ISource2GameClients::ClientCommand` hook asks the plugins
+before passing a player's console command to the game (`plugin_loader.cpp` FilterClientCommand).
+
+| Member | Thread | Purpose |
+|---|---|---|
+| `filter_client_command(self, cmd, fn, user)` | game | `fn(user, slot, steamid64, cmd, argc, argv)` runs for every player `cmd` (e.g. `jointeam`, which the team menu sends too); return 1 to block it. `say`, `say_team` and `ru` are reserved. The match plugin's team lock refuses `jointeam` to anything but a roster player's own side during warmup, knife and live |
+
 ### v1.13 (implemented)
 
 Team changes, pawn teleports with view angles, and creating entities. Engine side in
@@ -311,7 +328,7 @@ Users: practice `.fas` / `.watchme` (everyone else to the spectators), `.showspa
 `m_lifeState` written before `entity_spawn`), the view angle of `.loadnade`, `.last`, `.back N`
 and `.loadpos`; match `.spec`.
 
-### v1.14 (implemented)
+### v1.16 (implemented)
 
 Respawning one player. Same engine module and feature table as 1.13 (`practice_engine.cpp`,
 `practice_engine_spec.h`), member in `plugin_engine_api.cpp`.

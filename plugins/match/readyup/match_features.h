@@ -14,7 +14,11 @@
 //                      An admin pause only ends with .forceunpause.
 // Engine pauses Ready Up marks: "halftime" (mp_halftime_pausematch, esports.h) and "auto_5v5"
 // (sv_matchpause_auto_5v5: a side short of 5 players at a round start). Both teams .unpause them,
-// or an admin; neither is counted against a team.
+// or an admin; neither is counted against a team. An engine pause Ready Up did not start (the
+// map-load auto_5v5 pause, an admin's console mp_pause_match): at go-live (knife round, live,
+// resume) with both sides full it is stale and cleared (mp_unpause_match); otherwise it is
+// recorded ("auto_5v5" with a side short, else "engine"; the platform sees "engine" as technical)
+// and both teams .unpause it (match_rules.h DecideEnginePause).
 //   .forcepause .fp / .forceunpause .fup   admins (same as `.ru match pause` / `.ru match unpause`).
 // .forceready          (allow_force_ready) readies the caller's whole team in warmup once it has
 //                      min_players_to_ready connected (0 = the full roster).
@@ -30,6 +34,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace readyup {
 
@@ -43,11 +48,18 @@ void MatchFeaturesOnGameEvent(const char* name);
 // then never starts the next round (the game stays in RoundOver), so restores wait (fleet_bridge
 // DoRestore). Any thread.
 bool MatchFeaturesRoundOver();
+// An admin ends an auto_5v5 pause: CS2 would pause again at once while a side is short, so the
+// engine's auto pause goes off for the rest of the map (the admin chose to play on short). Call
+// before mp_unpause_match. Game thread / any thread (queues commands).
+void MatchFeaturesAdminUnpausing();
 // Between round_start and round_freeze_end (freeze time). Any thread.
 bool MatchFeaturesInFreeze();
 
 // Game thread, every frame: tactical timeout end, technical pause auto-unpause, forfeit timer.
 void MatchFeaturesTick();
+// A player left / came back (core events): one chat line for a rostered player on a live map.
+void MatchFeaturesOnPlayerLeft(uint64_t steamid64, const std::string& name);
+void MatchFeaturesOnPlayerBack(uint64_t steamid64, const std::string& name);
 
 // Pause commands for `team` (steamid64 = the player, 0 = console / admin on behalf of the team).
 // Reply goes to chat (players) or the console. Game thread.
@@ -56,6 +68,11 @@ void MatchFeaturesTacticalTimeout(WebhookTeam team, uint64_t steamid64, const st
 void MatchFeaturesUnpause(WebhookTeam team, uint64_t steamid64, const std::string& name);
 // `.forceready` from a roster player (match) or a player on CT/T (scrim warmup: ctx empty).
 void MatchFeaturesForceReady(uint64_t steamid64, const std::string& name);
+// Rule team_ready (match_rules.h DecideTeamReady), match warmup only: a rostered player's .ready /
+// .unready for their whole team. True = done here (chat line sent; *changed = the players whose
+// state changed). False = not this rule's case: the caller readies only the player (after
+// "needs N players connected" when the team is short).
+bool MatchFeaturesTeamReady(uint64_t steamid64, const std::string& name, bool ready, std::vector<uint64_t>* changed);
 
 // `.switch` (admin, no knife pick pending) / `ru match swap` / fleet cmd swap_teams: mp_swapteams in
 // match warmup, and the map's side follows (team1_ct <-> team2_ct) so team1 / team2 stay who they
@@ -68,7 +85,7 @@ bool MatchFeaturesRenameTeam(int team, const std::string& name, std::string* why
 // Center HUD while a map is live (ready_hud.cpp).
 struct LiveHudInfo {
   bool paused = false;
-  std::string type;            // "tactical" | "technical" | "admin" | "offline" | "halftime" | "auto_5v5"
+  std::string type;            // "tactical" | "technical" | "admin" | "offline" | "halftime" | "auto_5v5" | "engine"
   std::string byTeam;          // pausing team's name (empty for admins)
   bool pendingFreeze = false;  // technical: waiting for freeze time
   int secondsLeft = -1;        // technical auto-unpause countdown (-1 = none)

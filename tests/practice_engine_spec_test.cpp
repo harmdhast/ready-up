@@ -79,8 +79,8 @@ int main() {
             offsetof(ru_api, entity_spawn) > offsetof(ru_api, player_teleport),
         "1.13 members follow 1.12");
   Check(RU_API_VERSION_MINOR(READYUP_PLUGIN_API_VERSION) >= 13, "API minor 13");
-  Check(offsetof(ru_api, player_respawn) > offsetof(ru_api, entity_spawn), "1.14 member follows 1.13");
-  Check(RU_API_VERSION_MINOR(READYUP_PLUGIN_API_VERSION) >= 14, "API minor 14");
+  Check(offsetof(ru_api, player_respawn) > offsetof(ru_api, license_stopped), "1.16 member follows 1.15");
+  Check(RU_API_VERSION_MINOR(READYUP_PLUGIN_API_VERSION) >= 16, "API minor 16");
 
   std::printf("practice_engine_spec_test: %s\n", g_failed ? "FAIL" : "PASS");
   return g_failed ? 1 : 0;

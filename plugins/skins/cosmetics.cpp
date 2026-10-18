@@ -1,11 +1,13 @@
 #include "skins.h"
 
 #include "apply_internal.h"
+#include "knife_swap.h"
 
 #include <cstdint>
 #include <cstring>
 #include <mutex>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 
 // Spawn cosmetics: agent model + gloves. Called from GameFrameTick (game thread) on the frame a
@@ -15,6 +17,10 @@ namespace skins {
 namespace {
 
 std::unordered_set<uint64_t> g_warned;
+// The gloves we last put on each player's pawn (knife_swap.h PaintStamp): the same gloves on the
+// same item are not written again, so the client rebuilds the glove model once per spawn, not on
+// every cosmetics pass.
+std::unordered_map<uint64_t, PaintStamp> g_gloveStamps;
 
 void WarnOnce(uint64_t steamid64, const char* what) {
   if (!DebugOn() || steamid64 == 0) return;
@@ -77,10 +83,15 @@ bool ApplySpawnCosmetics(void* pawn, uint64_t steamid64, int team, bool late) {
       if (const auto s = FindWeaponSkin(steamid64, team, *gloveDef)) skin = *s;
       if (skin.paint_id <= 0) {
         WarnOnce(steamid64, "glove row has no paint in readyup_weapon_skins; gloves need a paint kit");
+      } else if (StampMatches(g_gloveStamps[steamid64], detail::ItemIdOf(item), *gloveDef, skin.paint_id, skin.seed,
+                              skin.wear)) {
+        // Already on: only the default-gloves bodygroup (the model may have loaded since).
+        (void)SetBodygroupByName(pawn, "default_gloves", 1);
       } else {
         const uint16_t def = static_cast<uint16_t>(*gloveDef);
         std::memcpy(static_cast<unsigned char*>(item) + detail::ItemDefIndexOffset(), &def, sizeof(def));
-        detail::WritePaint(nullptr, item, steamid64, skin);
+        const uint64_t id = detail::WritePaint(nullptr, item, steamid64, skin);
+        g_gloveStamps[steamid64] = PaintStamp{id, *gloveDef, skin.paint_id, skin.seed, skin.wear};
         if (detail::ItemInitializedOffset() >= 0) {
           const bool init = true;
           std::memcpy(static_cast<unsigned char*>(item) + detail::ItemInitializedOffset(), &init, sizeof(init));

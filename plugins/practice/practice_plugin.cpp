@@ -86,6 +86,7 @@
 #include "practice_feedback.h"
 #include "practice_lineups.h"
 #include "practice_rules.h"
+#include "readyup/map_names.h"
 #include "practice_scenarios.h"
 #include "practice_tools.h"
 
@@ -93,7 +94,9 @@
 
 #include "readyup/match_iface.h"
 #include "readyup/plugin_api.h"
+#include "readyup/essentials_iface.h"
 #include "readyup/practice_iface.h"
+#include "readyup/help_iface.h"
 #include "readyup/selftest_iface.h"
 
 #include <algorithm>
@@ -484,6 +487,9 @@ void ClearState(bool restorePawns) {
 
 // ---- mode ---------------------------------------------------------------------------------------
 
+// Set when the home map's settings went in for this map load (practice_set home_cvars, below).
+bool g_homeCvarsApplied = false;
+
 bool Enter(const char** why) {
   if (MatchOwnsMode()) {
     if (Match()->set_practice(1) != 1) {
@@ -500,6 +506,7 @@ bool Enter(const char** why) {
   g_toggles = Toggles{};
   g_dryRun = g_dryArmed = false;
   Cmd("exec ReadyUp/prac.cfg");
+  g_homeCvarsApplied = false;  // prac.cfg may set them back: the home map's settings again
   // Respawn everyone so they get prac.cfg's grenade set and weapons now, not on their next death.
   Cmd("mp_restartgame 1");
   Log("practice: on (%s)", MatchOwnsMode() ? "match plugin mode" : "standalone");
@@ -1544,6 +1551,97 @@ bool StoreAlways(bool on) {
 }
 double g_nextAlwaysCheck = 0;
 
+// A dedicated practice server (always=1) goes back to its home map, the essentials default map
+// for "practice" (`ru map default practice <map>`, the platform's practice.set {home_map}; a skin
+// tryout server's hub map), whenever nobody is on it. A workshop download takes a while: asked
+// again only after kHomeRetrySeconds.
+double g_homeAskedAt = -1e9;
+constexpr double kHomeRetrySeconds = 180.0;
+
+bool AnyHumanOn() {
+  bool any = false;
+  g_api->for_each_player(
+      g_api->self,
+      [](void* u, const ru_player* p) -> int {
+        if (p->is_bot) return 1;
+        *static_cast<bool*>(u) = true;
+        return 0;
+      },
+      &any);
+  return any;
+}
+
+// Settings for the home map (practice.set {home_cvars}), applied once per map load while on it.
+std::vector<std::string> g_homeCvars;
+bool g_homeCvarsRead = false;
+std::string HomeCvarsFile() {
+  const char* d = g_api->data_dir(g_api->self);
+  return std::string(d ? d : ".") + "/home_cvars.txt";
+}
+const std::vector<std::string>& HomeCvars() {
+  if (!g_homeCvarsRead) {
+    g_homeCvarsRead = true;
+    if (FILE* f = std::fopen(HomeCvarsFile().c_str(), "r")) {
+      char b[128];
+      while (std::fgets(b, sizeof(b), f) && static_cast<int>(g_homeCvars.size()) < kMaxHomeCvars) {
+        std::string line = b;
+        while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) line.pop_back();
+        if (ValidHomeCvar(line)) g_homeCvars.push_back(line);
+      }
+      std::fclose(f);
+    }
+  }
+  return g_homeCvars;
+}
+bool StoreHomeCvars(const std::vector<std::string>& lines) {
+  const std::string path = HomeCvarsFile(), tmp = path + ".tmp";
+  FILE* f = std::fopen(tmp.c_str(), "w");
+  if (!f) return false;
+  bool ok = true;
+  for (const auto& l : lines) ok = ok && std::fputs((l + "\n").c_str(), f) >= 0;
+  if (std::fclose(f) != 0 || !ok || std::rename(tmp.c_str(), path.c_str()) != 0) {
+    std::remove(tmp.c_str());
+    return false;
+  }
+  g_homeCvars = lines;
+  g_homeCvarsRead = true;
+  g_homeCvarsApplied = false;
+  return true;
+}
+
+// On the home map: its settings, once per load (and again after practice's cfg).
+void ApplyHomeCvars() {
+  if (g_homeCvarsApplied || HomeCvars().empty()) return;
+  const auto* e = static_cast<const ru_essentials_v1*>(
+      g_api->get_interface(g_api->self, RU_ESSENTIALS_IFACE_NAME, RU_ESSENTIALS_IFACE_VERSION));
+  if (!e || !e->default_map) return;
+  const std::string home = e->default_map("practice");
+  const char* cur = g_api->current_map(g_api->self);
+  if (home.empty() || !cur || !*cur || !readyup::mapnames::EntryMatchesLoaded(home, cur)) return;
+  g_homeCvarsApplied = true;
+  for (const auto& l : HomeCvars()) Cmd(l);
+  Log("practice: home map %s: %zu setting(s) applied", cur, HomeCvars().size());
+}
+
+void GoHomeIfEmpty(double now) {
+  if (!AlwaysOn() || now - g_homeAskedAt < kHomeRetrySeconds) return;
+  const auto* e = static_cast<const ru_essentials_v1*>(
+      g_api->get_interface(g_api->self, RU_ESSENTIALS_IFACE_NAME, RU_ESSENTIALS_IFACE_VERSION));
+  if (!e || !e->default_map || !e->load_map) return;
+  const std::string home = e->default_map("practice");
+  if (home.empty()) return;
+  const char* cur = g_api->current_map(g_api->self);
+  if (cur && *cur && readyup::mapnames::EntryMatchesLoaded(home, cur)) return;
+  if (AnyHumanOn()) return;
+  g_homeAskedAt = now;
+  // The engine names a workshop map by its bsp only: remember which id this load is for.
+  if (readyup::mapnames::MapRef ref; readyup::mapnames::ParseEntry(home, &ref) && !ref.workshop_id.empty()) {
+    readyup::mapnames::NoteWorkshopLoad(ref.workshop_id);
+  }
+  Log("practice: nobody on %s: back to the home map %s", cur && *cur ? cur : "?", home.c_str());
+  if (!e->load_map(home.c_str())) Log("practice: the home map %s could not be loaded", home.c_str());
+}
+
 std::vector<std::string> Args(const ru_command_ctx* c, int from) {
   std::vector<std::string> out;
   for (int i = from; i < c->argc; ++i) out.emplace_back(c->argv[i] ? c->argv[i] : "");
@@ -1800,6 +1898,9 @@ void OnGameEvent(void*, const char* evName, const ru_game_event* ev) {
 }
 
 void OnMapStart(void*, const ru_event*) {
+  g_homeCvarsApplied = false;
+  // Binds a workshop id to the map it loaded (EntryMatchesLoaded for the home map).
+  if (const char* cur = g_api->current_map(g_api->self); cur && *cur) readyup::mapnames::NoteMapLoaded(cur);
   // New map: new entities and pawns. A standalone practice server keeps practice on (the map load
   // may have run other cfgs); with the match plugin, always=1 re-enters from the tick.
   g_off = Offsets{};
@@ -1817,6 +1918,8 @@ void OnTick(void*, const ru_tick_info* t) {
       const char* why = "";
       if (Enter(&why)) Log("practice: always=1: practice mode switched on");
     }
+    GoHomeIfEmpty(t->now);
+    ApplyHomeCvars();
   }
   if (!IsActive()) {
     if (g_touched) {
@@ -1886,6 +1989,10 @@ int IfaceSetActive(int on, const char** why) {
   }
   return ok ? 1 : 0;
 }
+// readyup.help.practice: the `.help` line (essentials); off, how to turn it on.
+const char* HelpLineNow() { return IfaceActive() ? HelpLine() : "Practice: .prac to start practice mode"; }
+const ru_help_v1 g_help = {sizeof(ru_help_v1), &HelpLineNow};
+
 const char* IfaceHelp() { return HelpLine(); }
 int IfaceDryRun() { return IsActive() && g_dryRun ? 1 : 0; }
 int IfaceAlways() { return AlwaysOn() ? 1 : 0; }
@@ -1898,8 +2005,20 @@ int IfaceSetAlways(int on) {
   }
   return 1;
 }
+int IfaceSetHomeCvars(const char* const* lines, uint32_t n) {
+  if (n > static_cast<uint32_t>(kMaxHomeCvars)) return 0;
+  std::vector<std::string> out;
+  for (uint32_t i = 0; i < n; ++i) {
+    const std::string l = lines && lines[i] ? lines[i] : "";
+    if (!ValidHomeCvar(l)) return 0;
+    out.push_back(l);
+  }
+  if (!StoreHomeCvars(out)) return 0;
+  Log("practice: %zu home map setting(s) (set by the platform)", out.size());
+  return 1;
+}
 const ru_practice_v1 g_iface = {sizeof(ru_practice_v1), &IfaceActive, &IfaceSetActive, &IfaceHelp,
-                                &IfaceDryRun,           &IfaceAlways, &IfaceSetAlways};
+                                &IfaceDryRun,           &IfaceAlways, &IfaceSetAlways, &IfaceSetHomeCvars};
 
 void RunSelftest(ru_selftest_add_fn add, void* ctx) {
   std::string d = std::string(IsActive() ? "on" : "off") + (MatchOwnsMode() ? " (match plugin mode)" : " (standalone)");
@@ -1980,6 +2099,8 @@ READYUP_PLUGIN_EXPORT int readyup_plugin_load(const ru_api* api, uint32_t core_a
   }
   api->subscribe(api->self, RU_EVENT_MAP_START, &OnMapStart, nullptr);
   api->on_tick(api->self, &OnTick, nullptr);
+  api->provide_interface(api->self, RU_HELP_IFACE_PREFIX "practice", RU_HELP_IFACE_VERSION,
+                         const_cast<ru_help_v1*>(&g_help));
   api->provide_interface(api->self, RU_PRACTICE_IFACE_NAME, RU_PRACTICE_IFACE_VERSION, const_cast<ru_practice_v1*>(&g_iface));
   api->provide_interface(api->self, RU_SELFTEST_IFACE_PREFIX "practice", RU_SELFTEST_IFACE_VERSION,
                          const_cast<ru_selftest_iface_v1*>(&g_selftestIface));

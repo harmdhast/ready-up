@@ -152,6 +152,9 @@ struct WebhookMatchContext {
 
   // Roster player names (team1/2.players {steamid64: name}); simulated bots play as them.
   std::unordered_map<uint64_t, std::string> roster_names;
+  // `roster_names` (fleet rules.roster_names): roster players play under those names in game
+  // (roster_names.h). -1 = unset (server setting roster_names_enabled), 0 = off, 1 = on.
+  int roster_names_rule = -1;
   // `wingman: true`: 2v2 on CS2's wingman mode (wingman.h).
   bool wingman = false;
   // `demo_record` / `demo_upload` (fleet match.assign rules.demo.record / .upload): -1 = the

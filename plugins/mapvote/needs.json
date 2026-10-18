@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "plugin": "mapvote",
+  "api": [
+    "center_html_all_prio",
+    "center_html_release",
+    "chat_all",
+    "chat_to_slot",
+    "config_get",
+    "current_map",
+    "for_each_player",
+    "is_admin",
+    "on_tick",
+    "register_chat_command",
+    "register_ru_subcommand",
+    "server_command",
+    "subscribe"
+  ],
+  "surface": [
+    "CCommand",
+    "ClientPrint",
+    "ISource2GameClients::ClientCommand",
+    "ISource2Server::GameFrame",
+    "Host_Say",
+    "UTIL_ClientPrintAll"
+  ],
+  "schema": [],
+  "schema_optional": [],
+  "events": []
+}

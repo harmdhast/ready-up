@@ -10,8 +10,10 @@
 #include "readyup/license_status.h"
 #include "readyup/logging.h"
 #include "readyup/plugin_loader.h"
+#include "readyup/practice_engine.h"
 #include "readyup/real_server.h"
 #include "readyup/selftest.h"
+#include "readyup/slot_registry.h"
 #include "readyup/status_feed.h"
 
 #include <sys/mman.h>
@@ -77,6 +79,17 @@ static void Hook_GameFrame(void* thisptr, bool simulating, bool bFirstTick, bool
   // Entity primitives status (once the entity system verified on the first map). Skins itself
   // is a plugin now (plugins/skins); its per-tick work runs in plugins::Frame below.
   if (readyup::entity::EntitySystemReady()) readyup::entity::LogEngineStatusOnce();
+  // Human teams from the engine, about once a second (a byte per connected human): a player who
+  // stays on their side over a map load sends no player_team event, and the registry kept the 0
+  // the map load gave them (2026-10-17: the team lock moved BBro to CT 260 times).
+  {
+    static int s_teamFrames = 0;
+    if (s_teamFrames-- <= 0 && readyup::entity::EntitySystemReady()) {
+      s_teamFrames = 64;
+      const int n = readyup::ReconcileHumanTeams(&readyup::practice_engine::TeamOf);
+      if (n > 0 && DebugEnabled()) Debug("teams: %d registry team(s) taken from the engine\n", n);
+    }
+  }
   // Plugins last: pending load/unload/reload (a safe point: no plugin code is on the
   // stack), then queued commands/events, then per-tick callbacks. The match flow (ready-up,
   // knife, HUD, timers) is plugins/match and runs here too.

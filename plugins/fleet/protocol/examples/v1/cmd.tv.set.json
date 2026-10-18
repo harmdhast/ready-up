@@ -1,0 +1,24 @@
+{
+  "v": 1,
+  "type": "cmd",
+  "id": "01J8ZQ4T8W6N3X0F2R5K7M9P33",
+  "ts": 1790340012345,
+  "seq": 90,
+  "payload": {
+    "name": "tv.set",
+    "args": {
+      "scope": "match",
+      "settings": {
+        "allow_insecure_observers": true,
+        "relay_voice": null
+      }
+    },
+    "issued_by": {
+      "user_id": "u_1",
+      "name": "Admin",
+      "root": false
+    },
+    "expires_at": 0,
+    "audit_id": "aud_01J8ZR"
+  }
+}

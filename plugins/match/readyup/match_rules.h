@@ -5,9 +5,9 @@
 //
 // Where a value comes from (first one set wins):
 //   1. the match config: MAT JSON top-level keys `max_tech_pauses_per_team`, `tech_pause_max_seconds`,
-//      `both_teams_unpause_required`, `allow_force_ready`, `min_players_to_ready`,
+//      `both_teams_unpause_required`, `allow_force_ready`, `team_ready`, `min_players_to_ready`,
 //      `min_spectators_to_ready`, `forfeit_after_seconds`; a fleet `match.assign` maps `rules.pause.technical_per_team`,
-//      `rules.pause.technical_seconds`, `rules.pause.unpause`, `rules.ready.allow_force_ready`,
+//      `rules.pause.technical_seconds`, `rules.pause.unpause`, `rules.ready.allow_force_ready`, `rules.ready.team_ready`,
 //      `rules.ready.min_per_team` and `rules.forfeit.team_absent_seconds` onto them
 //      (fleet_state.cpp AssignToMatConfig),
 //   2. readyup.cfg / match.cfg keys of the same names (scrims only have these),
@@ -17,6 +17,7 @@
 // count and length are mp_team_timeout_max / mp_team_timeout_time (live.cfg, match cvars).
 
 #include <string>
+#include <vector>
 
 namespace readyup {
 
@@ -24,8 +25,14 @@ struct MatchRules {
   // -1 = not set (take the next source).
   int tech_pauses_per_team = -1;   // technical pauses per team per map; 0 = unlimited
   int tech_pause_max_seconds = -1; // auto-unpause after this long; 0 = no limit
+  // auto_5v5 (a side short: sv_matchpause_auto_5v5): unpaused once both sides are full again,
+  // or after this long; 0 = no limit (both teams .unpause, or an admin).
+  int disconnect_pause_max_seconds = -1;
   int both_teams_unpause = -1;     // 1: both teams type .unpause; 0: the pausing team alone
   int allow_force_ready = -1;      // `.forceready`
+  // `.ready` by a rostered player readies their whole team (and `.unready` un-readies it), once
+  // the team has the players .forceready needs. MAT key team_ready; fleet rules.ready.team_ready.
+  int team_ready = -1;
   int min_players_to_ready = -1;   // connected players a team needs for .forceready; 0 = full roster
   int min_spectators_to_ready = -1; // spectators (casters, match `spectators`) that must be ready before go-live; 0 = none
   int forfeit_after_seconds = -1;  // whole team disconnected while live -> forfeit; 0 = off
@@ -55,6 +62,15 @@ MatchRules ResolveRules(const MatchRules& match, const MatchRules& base);
 
 // A team with `used` technical pauses this map may pause again under `limit` (0 = unlimited).
 bool TechPauseAllowed(int used, int limit);
+// Chat when a rostered player leaves a live map: whether the match will pause for them
+// (auto 5v5 pause on) and, with a limit, for how long. `maxSeconds` <= 0 = no limit.
+// Chat when a map goes live: what is played and how long (2026-10-15, a live test: "so
+// you see how long you will play for"). `maxOvertimes` -1 = as many as needed.
+// One chat message per line: players scroll chat (Y), a long line wraps badly.
+std::vector<std::string> GoLiveRulesLines(int mapNumber, int numMaps, const std::string& map, int maxRounds,
+                                          bool overtime, int overtimeHalfRounds, int maxOvertimes,
+                                          bool damageTiebreak);
+std::string PlayerLeftChatLine(const std::string& name, const std::string& team, bool autoPause, int maxSeconds);
 // Technical pauses left (-1 = unlimited).
 int TechPausesLeft(int used, int limit);
 // Seconds until the automatic unpause (`elapsed` since the pause took effect), -1 = no limit.
@@ -70,8 +86,44 @@ bool UnpauseSatisfied(bool team1Confirmed, bool team2Confirmed, bool bothRequire
 // marks that pause as type "auto_5v5". ct / t: players (humans + bots) on each side.
 constexpr int kFullTeamPlayers = 5;
 bool Auto5v5PauseExpected(bool ruleOn, bool liveMap, bool alreadyPaused, int ctPlayers, int tPlayers);
+// What the freeze-time check does (match_features.cpp), polled from the round start until the
+// freeze time ends. enginePaused: CS2's own pause state (match_status.h EngineMatchPaused: 1 / 0 /
+// -1 unknown). The pause is only marked when the engine really paused: a stale team count marked
+// one at every round start and reported "paused" to the platform (2026-10-17, server-2). Paused
+// with both sides full is someone else's pause (Done). Unknown engine state: the counts decide,
+// as before.
+enum class Auto5v5Check { Done, Wait, Mark };
+Auto5v5Check Auto5v5Decide(bool ruleOn, bool liveMap, bool alreadyPaused, int enginePaused, int ctPlayers,
+                           int tPlayers);
 // The short side (3 CT / 2 T; the one with fewer players, CT on a tie), 0 when both are full.
 int Auto5v5ShortSide(int ctPlayers, int tPlayers);
+// An auto_5v5 pause ends by itself (pure): "full" once both sides have 5 again (held for
+// kAuto5v5FullHoldSeconds, so a player flickering in and out does not start the round),
+// "timeout" after maxSeconds (> 0) of the pause, else "" (it waits).
+constexpr double kAuto5v5FullHoldSeconds = 5.0;
+std::string Auto5v5UnpauseReason(int ctPlayers, int tPlayers, double fullForSeconds, double pausedSeconds,
+                                 int maxSeconds);
+
+// An engine pause Ready Up did not start (match_features.cpp tick, knife round or live map).
+// CS2 pauses at map load with sv_matchpause_auto_5v5 1 and nobody on a team yet; the pause
+// survives warmup and the go-live restart, and nothing in Ready Up knew about it, so `.up` said
+// "not paused" and the rounds never started (2026-10-17, a Bo3 final: an admin ran
+// mp_unpause_match after 3.5 minutes).
+//   enginePaused        CS2's pause state (1 / 0 / -1 unknown, match_status.h EngineMatchPaused)
+//   readyUpPause        Ready Up has a pause recorded (pause_state.h)
+//   playing             knife round or live map
+//   goLiveWindow        just after Ready Up started the knife round / went live / resumed
+//   autoRuleOn          sv_matchpause_auto_5v5 is on for the match
+//   ct, t, fullTeam     people per side and a full side (players_per_team, 5 by default)
+//   unmarkedForSeconds  how long the engine has been paused with no Ready Up pause
+// At go-live with both sides full the pause is stale: Clear (mp_unpause_match). A side short:
+// the engine pause is real, it is recorded (auto_5v5 with the rule on, else engine). Outside the
+// window an unmarked engine pause held for kEnginePauseMarkHoldSeconds is recorded too, so the
+// platform shows it and both teams `.unpause` it.
+enum class EnginePauseAction { None, Clear, MarkAuto5v5, MarkEngine };
+constexpr double kEnginePauseMarkHoldSeconds = 3.0;
+EnginePauseAction DecideEnginePause(int enginePaused, bool readyUpPause, bool playing, bool goLiveWindow,
+                                    bool autoRuleOn, int ct, int t, int fullTeam, double unmarkedForSeconds);
 
 // ---- .forceready -----------------------------------------------------------------------------
 
@@ -87,6 +139,16 @@ int ForceReadyRequired(int rosterSize, int minPlayers, int playersPerTeam = 0);
 // The minPlayers the ready gate and .forceready use: the rule, or 0 (a full team) after a failover
 // or a crash recovery, so every roster player is back before the match goes live again.
 int ReadyMinPlayers(int minPlayersRule, bool fullRoster);
+
+// Rule `team_ready`: what a rostered player's .ready / .unready in match warmup does.
+//   Single:     only the player (rule off).
+//   Team:       the whole team (connected roster players).
+//   NotEnough:  .ready with the rule on, but the team lacks the players .forceready needs: say so
+//               (ForceReadyRequired) and ready only the player.
+// .unready with the rule on is always Team.
+enum class TeamReadyAction { Single, Team, NotEnough };
+TeamReadyAction DecideTeamReady(bool teamReadyRule, bool ready, int connected, int rosterSize, int minPlayers,
+                                int playersPerTeam = 0);
 
 // ---- go-live ready gate ----------------------------------------------------------------------
 
@@ -106,6 +168,41 @@ struct ReadyTally {
   int total = 0;
 };
 ReadyTally TeamReadyTally(int rosterSize, int ready, int playersPerTeam = 0);
+
+// Rule `team_ready`, the warmup HUD's per-team line. here: connected roster players (capped at the
+// full team, so substitutes never inflate it); total: the full team (FullTeamSize); ready: the team
+// is ready when every full-team slot is filled by a ready connected player.
+struct TeamHudState {
+  int here = 0;
+  int total = 0;
+  bool allHere = false;
+  bool ready = false;
+};
+TeamHudState TeamHudStatus(int rosterSize, int connected, int readyConnected, int playersPerTeam = 0);
+
+// Bot fill (match config bot_fill): bots take every empty seat and are always ready, so a team
+// waits only for the roster humans who are connected; a team with nobody connected is ready (its
+// bots play). The "x/y ready" count is those humans: ready connected over connected.
+bool BotFillTeamReady(int connected, int readyConnected);
+ReadyTally BotFillReadyTally(int connected, int readyConnected);
+// Bot fill with no human connected: the match waits this long for anyone to join before its bots
+// play it alone (a bots-only bracket match), never going live the moment it loads.
+constexpr double kBotFillEmptyGraceSeconds = 60.0;
+// Bot fill: how long a match with players on its roster waits for one of them before its bots play.
+constexpr double kBotFillRosterGraceSeconds = 300.0;
+bool BotFillEmptyMayGoLive(double secondsEmpty);
+
+// A failover resume restores a round, so it waits for every roster player to be back; then the
+// normal ready-up applies (everyone .r), the match goes live and the backup round is restored.
+bool ResumeMayGoLive(int rosterTotal, int presentTotal);
+// "Every roster player is back" for ResumeMayGoLive, per team: a full team (FullTeamSize), so a
+// substitute who was not playing does not hold the resume up for the rejoin window.
+// needed / back: the totals to pass as ResumeMayGoLive's rosterTotal / presentTotal.
+struct ResumeHeadcount {
+  int needed = 0;
+  int back = 0;
+};
+ResumeHeadcount ResumeCount(const int roster[2], const int present[2], int playersPerTeam = 0);
 
 // Spectators of the match config (casters) who typed .ready: `required` (min_spectators_to_ready)
 // of them are needed before go-live. 0 (the default) never holds the match up.

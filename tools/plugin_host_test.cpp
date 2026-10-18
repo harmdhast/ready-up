@@ -57,6 +57,7 @@ void PrintLine(const char* msg) { Print("%s", msg); }
 bool DebugEnabled() { return false; }
 void SendToChat(const char* msg) { g_chat.push_back(std::string("[all] ") + msg); }
 void SendRawToChat(const char* msg) { g_chat.push_back(std::string("[raw] ") + msg); }
+void SendImportantToChat(const char* msg) { g_chat.push_back(std::string("[important] ") + msg); }
 bool ClientPrintChat(int slot, const char* msg) {
   g_chat.push_back("[slot " + std::to_string(slot) + "] " + msg);
   return true;

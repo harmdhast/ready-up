@@ -124,9 +124,10 @@ for mm in 0 1; do
   check "practice.so installed (essentials)" test -x "$CS/readyup/plugins/practice.so"
   check "practice gamedata next to the core (grenade spawning)" test -f "$CS/readyup/bin/linuxsteamrt64/engine-surface.practice.json"
   check "essentials.so installed (essentials bundle)" test -x "$CS/readyup/plugins/essentials.so"
+  check "mapvote.so installed (essentials bundle)" test -x "$CS/readyup/plugins/mapvote.so"
   check "prac.cfg seeded by the practice component" test -f "$CS/cfg/ReadyUp/prac.cfg"
   check "practice.cfg seeded, all comments (always off)" idle_cfg "$CS/cfg/ReadyUp/practice.cfg"
-  check "installed.json lists core essentials fleet match practice" test "$(installed "$S")" = "core essentials fleet match practice"
+  check "installed.json lists core essentials fleet match practice" test "$(installed "$S")" = "core essentials fleet mapvote match practice"
   for gi in gameinfo.gi gameinfo_branchspecific.gi; do
     check "$gi: exactly one readyup line" test "$(count_ru "$CS/$gi")" = 1
     check "$gi: readyup before Game csgo" test "$(line_of "$CS/$gi" csgo/readyup)" -lt "$(line_of "$CS/$gi" csgo)"
@@ -168,7 +169,7 @@ run --dir "$S" --remove skins >"$T/out" 2>&1 || { cat "$T/out"; fail "--remove s
 check "skins.so removed" test ! -e "$CS/readyup/plugins/skins.so"
 check "skins gamedata removed" test ! -e "$CS/readyup/bin/linuxsteamrt64/engine-surface.skins.json"
 check "core still installed" test -f "$CS/readyup/bin/linuxsteamrt64/libserver.so"
-check "installed.json back to core essentials fleet match practice" test "$(installed "$S")" = "core essentials fleet match practice"
+check "installed.json back to core essentials fleet match practice" test "$(installed "$S")" = "core essentials fleet mapvote match practice"
 
 echo "== add midas from the full zip (off by default), then remove it"
 run --dir "$S" --zip "$FULL" midas >"$T/out" 2>&1 || { cat "$T/out"; fail "midas install exited non-zero"; }
@@ -206,11 +207,11 @@ run --dir "$S" --remove fleet >"$T/out" 2>&1 || { cat "$T/out"; fail "--remove f
 check "fleet.so removed" test ! -e "$CS/readyup/plugins/fleet.so"
 check "fleet credentials kept" test -f "$CS/readyup/plugins/fleet/credentials.json"
 check "user fleet.cfg kept" grep -q "t.example.com" "$CS/cfg/ReadyUp/fleet.cfg"
-check "installed.json is core essentials match practice" test "$(installed "$S")" = "core essentials match practice"
+check "installed.json is core essentials match practice" test "$(installed "$S")" = "core essentials mapvote match practice"
 run --dir "$S" --zip "$(ls "$DIST"/ready-up-fleet-*.zip)" fleet >"$T/out" 2>&1 || { cat "$T/out"; fail "fleet install exited non-zero"; }
 check "fleet.so back" test -x "$CS/readyup/plugins/fleet.so"
 check "user fleet.cfg not overwritten" grep -q "t.example.com" "$CS/cfg/ReadyUp/fleet.cfg"
-check "installed.json is core essentials fleet match practice again" test "$(installed "$S")" = "core essentials fleet match practice"
+check "installed.json is core essentials fleet match practice again" test "$(installed "$S")" = "core essentials fleet mapvote match practice"
 
 echo "== older install (core + match, before practice / essentials were split out) -> update adds both"
 S3="$T/server-old"
@@ -231,8 +232,8 @@ make_server "$S4" 0
 run --dir "$S4" --zip "$FULL" --accept-license=noncommercial full >"$T/out" 2>&1 || { cat "$T/out"; fail "full install exited non-zero"; }
 # (+ tools: the offline gamedata checkers, when the build had them)
 check "installed.json is every component" \
-  test "$(installed "$S4" | sed "s/ tools / /; s/ tools$//")" = "addons core deathmatch essentials fleet match midas practice skins whitelist"
-for so in match fleet practice essentials skins midas whitelist deathmatch addons; do
+  test "$(installed "$S4" | sed "s/ tools / /; s/ tools$//")" = "addons community core deathmatch essentials fleet mapvote match midas movement practice skins tv whitelist"
+for so in match fleet practice essentials skins midas whitelist deathmatch mapvote community movement addons tv; do
   check "full: $so.so installed" test -x "$S4/game/csgo/readyup/plugins/$so.so"
 done
 
@@ -313,7 +314,7 @@ PY
   check "release mode installed core" test -f "$S/game/csgo/readyup/bin/linuxsteamrt64/libserver.so"
   check "release mode: essentials.so from ready-up-essentials-plugin-*" test -x "$S/game/csgo/readyup/plugins/essentials.so"
   check "release mode installed core essentials fleet match practice" \
-    test "$(installed "$S")" = "core essentials fleet match practice"
+    test "$(installed "$S")" = "core essentials fleet mapvote match practice"
   check "release mode printed the release notes" grep -q "Test release notes line 1" "$T/out"
   # Pretend an older core is installed: the update shows old -> new.
   python3 -c 'import json,sys; p=sys.argv[1]; d=json.load(open(p)); d["components"]["core"]="0.0.1"; json.dump(d,open(p,"w"))' \

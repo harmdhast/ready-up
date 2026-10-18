@@ -108,10 +108,14 @@ void ModesOnMapLoaded();
 
 // A human joined CT or T (engine player_team, or a team-lock move). In match warmup the round is one
 // long round, so a player who joins mid-round stays dead until it ends: 0.5 s later the joiner is
-// respawned alone (ru_api 1.14 player_respawn). Without it, or when it is refused, the warmup round
+// respawned alone (ru_api 1.16 player_respawn). Without it, or when it is refused, the warmup round
 // is restarted so everyone spawns (debounced). Only in the match warmup itself: nothing once going
 // live was triggered or in a recovered live map's gate. Game thread.
 void ModesOnHumanJoinedTeam(int slot, uint64_t steamid, int team);
+
+// A level load (RU_EVENT_MAP_START): the gamemode cfg reset the cvars, so the mode's rules (warmup,
+// idle, practice) are applied again, also when the map is the same one as before.
+void ModesOnMapStart();
 
 // Map/series end (match_end.cpp, game thread, outside the modes mutex):
 // - ModesBeginNextMapWarmup: postgame -> match warmup for the next map of the series (not
@@ -188,6 +192,10 @@ const char* KnifeWinnerTeamString();
 bool ForceStartMatch(bool force = false);
 bool RestartMatch();
 bool EndMatchResetServer();
+// The team lock: true when a roster player of the loaded match may not `jointeam <team>` now
+// (anything but their own team's side, while the match is in warmup, knife or live; a fat finger
+// in the team menu does nothing). `team` is jointeam's argument (0 auto, 1 spec, 2 T, 3 CT).
+bool TeamLockRefusesJoin(uint64_t steamid64, int team);
 
 // Apply match cvars immediately (no restart). Best-effort.
 void ApplyMatchCvarsNow();

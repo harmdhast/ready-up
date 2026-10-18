@@ -13,7 +13,7 @@ struct PauseSnapshot {
   bool team1_ready_to_unpause = false;
   bool team2_ready_to_unpause = false;
   // Who paused and why (docs/FLEET.md §9.1 pause.type / pause.by): "tactical" | "technical" |
-  // "admin" | "offline" | "halftime" | "auto_5v5"; `by` = SteamID64, "Console", "platform:<user>"
+  // "admin" | "offline" | "halftime" | "auto_5v5" | "engine"; `by` = SteamID64, "Console", "platform:<user>"
   // or "server"; team = the pausing team (auto_5v5: the team that is short).
   std::string type;
   std::string by;

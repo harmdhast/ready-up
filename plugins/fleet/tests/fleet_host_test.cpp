@@ -57,6 +57,7 @@ void PrintLine(const char* msg) { Print("%s", msg); }
 bool DebugEnabled() { return true; }
 void SendToChat(const char*) {}
 void SendRawToChat(const char*) {}
+void SendImportantToChat(const char*) {}
 bool ClientPrintChat(int, const char*) { return true; }
 bool SendToSlotChat(int, const char*) { return true; }
 bool EnqueueServerCommand(const char*) { return true; }

@@ -323,6 +323,16 @@ int ApiLicensePlayerLine(ru_plugin* self, char* buf, uint32_t len) {
   return static_cast<int>(line.size());
 }
 
+// ---- v1.15 --------------------------------------------------------------------------
+
+int ApiLicenseStopped(ru_plugin* self, char* buf, uint32_t len) {
+  if (!self) return -1;
+  const std::string why = license::StoppedMessage();
+  if (why.empty()) return -1;
+  if (buf && len > 0) std::snprintf(buf, len, "%s", why.c_str());
+  return static_cast<int>(why.size());
+}
+
 // ---- v1.10 --------------------------------------------------------------------------
 
 int ApiSetCoreSetting(ru_plugin* self, const char* key, const char* value) {
@@ -385,7 +395,18 @@ int ApiEngineFeatureAvailable(ru_plugin* self, const char* feature) {
 int ApiPlayerChangeTeam(ru_plugin* self, int slot, int team) {
   if (!CheckGameThread(self, "player_change_team")) return 0;
   std::string why;
-  if (practice_engine::ChangeTeam(slot, team, &why)) return 1;
+  if (practice_engine::ChangeTeam(slot, team, &why)) {
+    // ChangeTeam to the team the player is already on returns early: no player_team event, so the
+    // registry kept the 0 a map load gave it and callers retried every second (2026-10-17: "moved
+    // BBro to CT" 260 times in 2 min of a live map). The engine's team after the call goes in.
+    const int now = practice_engine::TeamOf(slot);
+    if (now >= 0) {
+      for (const auto& h : ListHumans()) {
+        if (h.slot == slot && h.steamid64 != 0 && h.team != now) (void)ObserveHumanTeamFromEvent(h.steamid64, slot, now);
+      }
+    }
+    return 1;
+  }
   Print("plugin[%s]: player_change_team(%d, %d) refused: %s\n", detail::PluginNameOf(self), slot, team, why.c_str());
   return 0;
 }
@@ -414,7 +435,7 @@ int ApiEntitySpawn(ru_plugin* self, void* ent) {
   return 0;
 }
 
-// ---- v1.14 --------------------------------------------------------------------------
+// ---- v1.16 --------------------------------------------------------------------------
 
 int ApiPlayerRespawn(ru_plugin* self, int slot) {
   if (!CheckGameThread(self, "player_respawn")) return 0;
@@ -472,7 +493,8 @@ void detail::FillEngineApi(ru_api* a) {
   a->player_teleport = &ApiPlayerTeleport;
   a->entity_create = &ApiEntityCreate;
   a->entity_spawn = &ApiEntitySpawn;
-  a->player_respawn = &ApiPlayerRespawn;  // v1.14
+  a->license_stopped = &ApiLicenseStopped;                        // v1.15
+  a->player_respawn = &ApiPlayerRespawn;                          // v1.16
 }
 
 }  // namespace readyup::plugins

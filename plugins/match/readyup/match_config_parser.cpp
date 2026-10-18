@@ -277,8 +277,10 @@ std::optional<WebhookMatchContext> ParseWebhookMatchContextFromJson(const std::s
   };
   ruleInt("max_tech_pauses_per_team", &ctx.rules.tech_pauses_per_team);
   ruleInt("tech_pause_max_seconds", &ctx.rules.tech_pause_max_seconds);
+  ruleInt("disconnect_pause_max_seconds", &ctx.rules.disconnect_pause_max_seconds);
   ruleBool("both_teams_unpause_required", &ctx.rules.both_teams_unpause);
   ruleBool("allow_force_ready", &ctx.rules.allow_force_ready);
+  ruleBool("team_ready", &ctx.rules.team_ready);
   ruleInt("min_players_to_ready", &ctx.rules.min_players_to_ready);
   ruleInt("min_spectators_to_ready", &ctx.rules.min_spectators_to_ready);
   ruleInt("forfeit_after_seconds", &ctx.rules.forfeit_after_seconds);
@@ -301,6 +303,7 @@ std::optional<WebhookMatchContext> ParseWebhookMatchContextFromJson(const std::s
   ruleBool("playout", &ctx.playout);
   ruleBool("whitelist", &ctx.whitelist);
   ruleBool("autoready", &ctx.autoready);
+  ruleBool("roster_names", &ctx.roster_names_rule);
 
   // The server plays the cvars' mp_maxrounds (they go out after every cfg), so the map end is
   // decided on it too, also when maxRounds is given: a standalone match said maxRounds 8 with
@@ -386,7 +389,12 @@ std::optional<WebhookMatchContext> ParseWebhookMatchContextFromJson(const std::s
         if (sid) ctx.coach_team[sid] = teamTag;
       };
       if (IsObject(coaches)) {
-        for (const auto& kv : coaches->obj) add(ParseSteamId64Loose(kv.first));
+        for (const auto& kv : coaches->obj) {
+          const uint64_t sid = ParseSteamId64Loose(kv.first);
+          add(sid);
+          // Their name in game too (roster_names.h).
+          if (sid && kv.second.type == Value::Type::String && !kv.second.str.empty()) ctx.roster_names[sid] = kv.second.str;
+        }
       } else if (coaches->type == Value::Type::Array) {
         for (const auto& v : coaches->arr) {
           if (v.type == Value::Type::String) add(ParseSteamId64Loose(v.str));

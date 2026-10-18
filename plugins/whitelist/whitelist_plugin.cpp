@@ -10,7 +10,8 @@
 //
 // Chat: `.ru whitelist ...` (admins). The state is saved in the plugin's data dir
 // (csgo/readyup/plugins/whitelist/whitelist.json), so it survives restarts. The platform can
-// drive it over the fleet link today with a root `exec` of the same console lines.
+// drive it over the fleet link (`cmd whitelist.set`). Other plugins add guests through
+// readyup.whitelist.v1 set_guests (tv.so's casters): never kicked, not saved.
 #include "whitelist_rules.h"
 
 #include "readyup/match_iface.h"
@@ -23,6 +24,7 @@
 #include <map>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #ifndef WHITELIST_VERSION
 #define WHITELIST_VERSION "dev"
@@ -33,6 +35,7 @@ namespace {
 
 const ru_api* g_api = nullptr;
 State g_state;
+Guests g_guests;  // readyup.whitelist.v1 set_guests (not saved)
 std::string g_path;
 double g_lastSweep = -1e9;
 std::map<uint64_t, double> g_kickedAt;                   // steamid64 -> last kick (no repeats within 5 s)
@@ -84,6 +87,7 @@ struct SweepCtx {
 int SweepPlayer(void* user, const ru_player* p) {
   auto* c = static_cast<SweepCtx*>(user);
   if (!p->connected || p->is_bot || p->steamid64 == 0) return 1;
+  if (g_guests.Is(p->steamid64)) return 1;
   if (!ShouldKick(g_state, c->mode, p->steamid64, false, IsAdmin(p->steamid64, c->now))) return 1;
   auto it = g_kickedAt.find(p->steamid64);
   if (it != g_kickedAt.end() && c->now - it->second < 5.0) return 1;
@@ -155,6 +159,11 @@ void OnRu(void*, const ru_command_ctx* ctx) {
     for (uint64_t id : g_state.steamids) l += (l.empty() ? "" : " ") + std::to_string(id);
     Reply(ctx, std::string(g_state.enabled ? "on" : "off") + ", " + std::to_string(g_state.steamids.size()) +
                    " player(s)" + (l.empty() ? "" : ": " + l));
+    if (g_guests.Count() > 0) {
+      std::string owners;
+      for (const auto& kv : g_guests.byOwner) owners += (owners.empty() ? "" : ", ") + kv.first + " " + std::to_string(kv.second.size());
+      Reply(ctx, std::to_string(g_guests.Count()) + " guest(s) other plugins let in (" + owners + ")");
+    }
     return;
   } else {
     Reply(ctx, "unknown command. Type .ru help whitelist for the list.");
@@ -165,7 +174,7 @@ void OnRu(void*, const ru_command_ctx* ctx) {
 
 void RunSelftest(ru_selftest_add_fn add, void* ctx) {
   const std::string d = std::string(g_state.enabled ? "on" : "off") + ", " + std::to_string(g_state.steamids.size()) +
-                        " player(s), " + g_path;
+                        " player(s), " + std::to_string(g_guests.Count()) + " guest(s), " + g_path;
   add(ctx, "INFO", "whitelist", d.c_str());
 }
 const ru_selftest_iface_v1 g_selftestIface = {sizeof(ru_selftest_iface_v1), &RunSelftest};
@@ -186,7 +195,18 @@ int IfaceGet(uint32_t* count) {
   if (count) *count = static_cast<uint32_t>(g_state.steamids.size());
   return g_state.enabled ? 1 : 0;
 }
-const ru_whitelist_v1 g_iface = {sizeof(ru_whitelist_v1), &IfaceSet, &IfaceGet};
+int IfaceSetGuests(const char* owner, const uint64_t* ids, uint32_t count) {
+  if (!owner || (count > 0 && !ids)) return 0;
+  std::vector<uint64_t> v(ids, ids + count);
+  bool changed = false;
+  if (!g_guests.Set(owner, v, &changed)) return 0;
+  if (changed) {
+    ru_logf(g_api, RU_LOG_INFO, "guests of %s: %zu", owner, g_guests.byOwner.count(owner) ? g_guests.byOwner[owner].size() : 0);
+  }
+  return 1;
+}
+int IfaceIsGuest(uint64_t sid) { return g_guests.Is(sid) ? 1 : 0; }
+const ru_whitelist_v1 g_iface = {sizeof(ru_whitelist_v1), &IfaceSet, &IfaceGet, &IfaceSetGuests, &IfaceIsGuest};
 
 }  // namespace
 }  // namespace whitelist
@@ -212,6 +232,7 @@ READYUP_PLUGIN_EXPORT int readyup_plugin_load(const ru_api* api, uint32_t core_a
   g_api = api;
   g_kickedAt.clear();
   g_adminAt.clear();
+  g_guests = Guests{};  // owners set theirs again (tv.so does every few seconds)
   g_lastSweep = -1e9;
   const char* dir = api->data_dir(api->self);
   g_path = dir && *dir ? std::string(dir) + "/whitelist.json" : std::string();

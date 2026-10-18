@@ -3,6 +3,7 @@
 // health, and merges what this returns.
 #include "readyup/match_status.h"
 
+#include "readyup/host.h"
 #include "readyup/map_names.h"
 #include "readyup/demo_recorder.h"
 #include "readyup/esports.h"
@@ -147,6 +148,86 @@ void MatchStatusInstall() {
 
 namespace {
 
+// ---- engine reads for the status (game thread) -----------------------------------------------
+
+int g_offPing = -2;      // CCSPlayerController.m_iPing
+int g_offRulesPtr = -2;  // CCSGameRulesProxy.m_pGameRules
+int g_offWarmup = -2;    // CCSGameRules.m_bWarmupPeriod
+int g_offFreeze = -2;    // CCSGameRules.m_bFreezePeriod
+int g_offWaitResume = -2;  // CCSGameRules.m_bMatchWaitingForResume (mp_pause_match, auto 5v5)
+int g_offGamePaused = -2;  // CCSGameRules.m_bGamePaused
+uint32_t g_rulesProxy = 0xFFFFFFFFu;
+long long g_rulesScanAtMs = 0;
+// When each roster player was first seen connected (unix ms); dropped when they leave.
+std::unordered_map<uint64_t, long long> g_connectedAtMs;
+
+// The player's ping in ms from their controller, or -1 when unknown.
+int PingOfSlot(int slot) {
+  const ru_api* a = host::Api();
+  if (!a || slot < 0 || slot >= 64 || a->entity_system_status(a->self) != RU_ENTSYS_OK) return -1;
+  if (g_offPing == -2) g_offPing = a->schema_offset(a->self, "CCSPlayerController", "m_iPing");
+  if (g_offPing < 0) return -1;
+  void* ent = a->entity_by_index(a->self, slot + 1);
+  if (!ent) return -1;
+  const char* cls = a->entity_classname(a->self, ent);
+  if (!cls || std::strcmp(cls, "cs_player_controller") != 0) return -1;
+  uint32_t v = 0;
+  std::memcpy(&v, static_cast<unsigned char*>(ent) + g_offPing, sizeof(v));
+  return v > 5000 ? -1 : static_cast<int>(v);
+}
+
+// CS2's own game rules flags (not Ready Up's phase). The game rules proxy is found once per map
+// (at most one scan every 10 s while missing) and kept by handle.
+struct GameFlags {
+  int warmup = -1;  // 1 in CS2's warmup, 0 not, -1 unknown
+  int freeze = -1;  // 1 in freeze time
+  int paused = -1;  // 1 while the match is paused or waits to pause (m_bMatchWaitingForResume / m_bGamePaused)
+};
+
+GameFlags ReadGameFlags(long long nowMs) {
+  GameFlags out;
+  const ru_api* a = host::Api();
+  if (!a || a->entity_system_status(a->self) != RU_ENTSYS_OK) return out;
+  if (g_offRulesPtr == -2) {
+    g_offRulesPtr = a->schema_offset(a->self, "CCSGameRulesProxy", "m_pGameRules");
+    g_offWarmup = a->schema_offset(a->self, "CCSGameRules", "m_bWarmupPeriod");
+    g_offFreeze = a->schema_offset(a->self, "CCSGameRules", "m_bFreezePeriod");
+    g_offWaitResume = a->schema_offset(a->self, "CCSGameRules", "m_bMatchWaitingForResume");
+    g_offGamePaused = a->schema_offset(a->self, "CCSGameRules", "m_bGamePaused");
+  }
+  if (g_offRulesPtr < 0) return out;
+  void* proxy = g_rulesProxy != 0xFFFFFFFFu ? a->entity_from_handle(a->self, g_rulesProxy) : nullptr;
+  if (!proxy) {
+    g_rulesProxy = 0xFFFFFFFFu;
+    if (nowMs - g_rulesScanAtMs < 10000) return out;
+    g_rulesScanAtMs = nowMs;
+    for (int i = 65; i < 4096 && !proxy; ++i) {
+      void* e = a->entity_by_index(a->self, i);
+      if (!e) continue;
+      const char* cn = a->entity_classname(a->self, e);
+      if (cn && std::strcmp(cn, "cs_gamerules") == 0) {
+        proxy = e;
+        g_rulesProxy = a->entity_handle_of(a->self, e);
+      }
+    }
+    if (!proxy) return out;
+  }
+  void* rules = nullptr;
+  std::memcpy(&rules, static_cast<unsigned char*>(proxy) + g_offRulesPtr, sizeof(rules));
+  if (!rules) return out;
+  auto flag = [&](int off) {
+    if (off < 0) return -1;
+    bool v = false;
+    std::memcpy(&v, static_cast<unsigned char*>(rules) + off, sizeof(v));
+    return v ? 1 : 0;
+  };
+  out.warmup = flag(g_offWarmup);
+  out.freeze = flag(g_offFreeze);
+  const int wait = flag(g_offWaitResume), gp = flag(g_offGamePaused);
+  out.paused = wait == 1 || gp == 1 ? 1 : (wait == 0 || gp == 0) ? 0 : -1;
+  return out;
+}
+
 // The summary fields, the MatchState of the loaded match / scrim (null when none) and
 // update_safe. Game thread.
 void Collect(Json* sOut, Json* stOut, bool* safeOut) {
@@ -179,15 +260,23 @@ void Collect(Json* sOut, Json* stOut, bool* safeOut) {
   if (ctx) {
     // Per team, ready players up to a full team over the full team: substitutes never count toward
     // the players the match waits for (match_rules.h TeamReadyTally).
-    int teamRoster[2] = {0, 0}, teamReady[2] = {0, 0};
+    int teamRoster[2] = {0, 0}, teamReady[2] = {0, 0}, teamPresent[2] = {0, 0}, teamPresentReady[2] = {0, 0};
     for (const auto& kv : ctx->roster_team) {
       if (!kv.first) continue;
       const int t = kv.second == WebhookTeam::Team2 ? 1 : 0;
       ++teamRoster[t];
-      if (IsReady(kv.first)) ++teamReady[t];
+      const bool ready = IsReady(kv.first);
+      if (ready) ++teamReady[t];
+      if (humanBy.count(kv.first)) {
+        ++teamPresent[t];
+        if (ready) ++teamPresentReady[t];
+      }
     }
     for (int t = 0; t < 2; ++t) {
-      const ReadyTally tally = TeamReadyTally(teamRoster[t], teamReady[t], ctx->players_per_team);
+      // Bot fill: the connected humans only (match_rules.h BotFillReadyTally).
+      const ReadyTally tally = ctx->bot_fill
+                                   ? BotFillReadyTally(teamPresent[t], teamPresentReady[t])
+                                   : TeamReadyTally(teamRoster[t], teamReady[t], ctx->players_per_team);
       ready += tally.ready;
       readyTotal += tally.total;
     }
@@ -240,6 +329,10 @@ void Collect(Json* sOut, Json* stOut, bool* safeOut) {
   players["connected"] = static_cast<int>(humans.size());
   players["expected"] = ctx ? static_cast<int>(ctx->roster_team.size()) : 0;
   s["players"] = std::move(players);
+  // CS2's own warmup flag, in every mode (idle too): csm's status table and debugging.
+  const GameFlags game = ReadGameFlags(nowMs);
+  if (game.warmup >= 0) s["game_warmup"] = game.warmup == 1;
+  if (game.freeze >= 0) s["game_freeze"] = game.freeze == 1;
   Json rdy = Json::Object();
   rdy["ready"] = ready;
   rdy["total"] = readyTotal;
@@ -360,6 +453,15 @@ void Collect(Json* sOut, Json* stOut, bool* safeOut) {
         pj["role"] = ctx->substitutes.count(kv.first) ? "sub" : "player";
         pj["connected"] = h != humanBy.end();
         pj["ready"] = IsReady(kv.first);
+        if (h != humanBy.end()) {
+          const int ping = PingOfSlot(h->second->slot);
+          if (ping >= 0) pj["ping"] = ping;
+          auto at = g_connectedAtMs.find(kv.first);
+          if (at == g_connectedAtMs.end()) at = g_connectedAtMs.emplace(kv.first, nowMs).first;
+          pj["connected_at"] = at->second;
+        } else {
+          g_connectedAtMs.erase(kv.first);
+        }
         pl[std::to_string(kv.first)] = std::move(pj);
       }
       t["players"] = std::move(pl);
@@ -411,6 +513,15 @@ void Collect(Json* sOut, Json* stOut, bool* safeOut) {
     Json round = Json::Object();
     round["number"] = ms.round_number;
     st["round"] = std::move(round);
+
+    // CS2's own view, next to Ready Up's phase: a map stuck in CS2's warmup shows up as a
+    // mismatch on the platform (FLEET.md §6, `game`).
+    if (game.warmup >= 0 || game.freeze >= 0) {
+      Json gj = Json::Object();
+      if (game.warmup >= 0) gj["warmup"] = game.warmup == 1;
+      if (game.freeze >= 0) gj["freeze_period"] = game.freeze == 1;
+      st["game"] = std::move(gj);
+    }
 
     // Ruleset preset + overrides, and the keys that differ from the preset (ruleset.h).
     const EffectiveRuleSet er = CurrentEffectiveRules();
@@ -531,6 +642,11 @@ void MatchStatusRestoreJson(const Json& j) {
       g_demos[std::atoi(kv.first.c_str())] = d;
     }
   }
+}
+
+int EngineMatchPaused() {
+  if (!host::OnGameThread()) return -1;
+  return ReadGameFlags(UnixMs()).paused;
 }
 
 }  // namespace readyup

@@ -28,11 +28,6 @@ MapEndPlan ComputeMapEndPlan(bool demoRecording, bool hasUploadUrl, int tvDelay,
   return p;
 }
 
-double KickDelayAfterSeriesEnd(int restartDelay, int configuredKickDelay) {
-  const double d = (restartDelay - 1) + std::max(0, configuredKickDelay);
-  return std::min(kMatchEndKickMaxS, std::max(0.0, d));
-}
-
 int RemainingMaps(int numMaps, int maplistCount, int mapNumber) {
   const int total = maplistCount > 0 ? std::min(numMaps, maplistCount) : numMaps;
   return std::max(0, total - mapNumber);
@@ -69,6 +64,10 @@ std::string ToJson(const MatchFlowEvent& e) {
          ",\"demo_recorded\":" + (e.demoRecorded ? "true" : "false") +
          ",\"demo_upload_configured\":" + (e.demoUploadConfigured ? "true" : "false") +
          ",\"stats\":" + stats::ToJson(e.stats);
+    if (e.decidedByDamage) {
+      j += ",\"decided_by\":\"damage\",\"damage\":{\"team1\":" + std::to_string(e.team1Damage) +
+           ",\"team2\":" + std::to_string(e.team2Damage) + "}";
+    }
   } else if (e.type == MatchFlowEventType::SeriesEnd) {
     j += ",\"seconds_until_reset\":" + std::to_string(e.secondsUntilReset);
   }

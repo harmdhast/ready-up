@@ -50,10 +50,17 @@ struct Entry {
   bool connected = true;
 };
 
+struct TeamLine {
+  std::string name;
+  TeamHudState st;
+};
+
 struct Board {
   std::string status = "WARMUP";  // header status: WARMUP / SCRIM / RECOVERY / FAILOVER, or the countdown
   const char* statusColor = kGold;
   std::string label[2] = {"CT", "T"};  // team line labels: [0] CT, [1] T (escaped HTML)
+  bool teamView = false;  // rule team_ready: per-team lines (match warmup, not scrim, not bot fill)
+  TeamLine teams[2];      // [0] = T (side 2), [1] = CT (side 3); set when teamView
   std::vector<Entry> entries;
   int botsCt = 0;
   int botsT = 0;
@@ -164,7 +171,7 @@ static Board BuildBoard(ReadyUpMode mode, const std::optional<WebhookMatchContex
     b.label[1] = ReadyHudTeamLabel(false, team1Ct ? ctx->team2_name : ctx->team1_name);
     std::unordered_set<uint64_t> connected;
     for (const auto& h : humans) connected.insert(h.steamid64);
-    int teamRoster[2] = {0, 0}, teamReady[2] = {0, 0};
+    int teamRoster[2] = {0, 0}, teamReady[2] = {0, 0}, teamPresent[2] = {0, 0}, teamPresentReady[2] = {0, 0};
     for (const auto& kv : ctx->roster_team) {
       if (kv.first == 0) continue;
       Entry e;
@@ -176,11 +183,20 @@ static Board BuildBoard(ReadyUpMode mode, const std::optional<WebhookMatchContex
       e.connected = connected.count(kv.first) != 0;
       ++teamRoster[t1 ? 0 : 1];
       if (e.ready) ++teamReady[t1 ? 0 : 1];
+      if (e.connected) {
+        ++teamPresent[t1 ? 0 : 1];
+        if (e.ready) ++teamPresentReady[t1 ? 0 : 1];
+      }
+      // Bot fill: roster players who are not here are not waited for, so not listed.
+      if (ctx->bot_fill && !e.connected) continue;
       b.entries.push_back(std::move(e));
     }
     // Substitutes never raise the total (match_rules.h TeamReadyTally): 5 + 1 sub reads x/5.
+    // Bot fill counts the connected humans only (BotFillReadyTally): 2 humans + 3 bots reads x/2.
     for (int t = 0; t < 2; ++t) {
-      const ReadyTally tally = TeamReadyTally(teamRoster[t], teamReady[t], ctx->players_per_team);
+      const ReadyTally tally = ctx->bot_fill
+                                   ? BotFillReadyTally(teamPresent[t], teamPresentReady[t])
+                                   : TeamReadyTally(teamRoster[t], teamReady[t], ctx->players_per_team);
       b.ready += tally.ready;
       b.total += tally.total;
       const int sideIdx = ((t == 0) == team1Ct) ? 0 : 1;
@@ -188,6 +204,15 @@ static Board BuildBoard(ReadyUpMode mode, const std::optional<WebhookMatchContex
       b.sideTotal[sideIdx] = tally.total;
     }
     b.tallied = true;
+    if (!b.scrim && !ctx->bot_fill && EffectiveRules().team_ready) {
+      b.teamView = true;
+      for (int t = 0; t < 2; ++t) {
+        const int side = ((t == 0) == team1Ct) ? 3 : 2;
+        TeamLine& tl = b.teams[side == 3 ? 1 : 0];
+        tl.name = (t == 0) ? ctx->team1_name : ctx->team2_name;
+        tl.st = TeamHudStatus(teamRoster[t], teamPresent[t], teamPresentReady[t], ctx->players_per_team);
+      }
+    }
     if (DevBotsReadyEnabled()) {
       for (const auto& bot : ListBots()) {
         if (bot.team == 3) b.botsCt++;
@@ -211,6 +236,14 @@ static Board BuildBoard(ReadyUpMode mode, const std::optional<WebhookMatchContex
 
 // One side's line: the team count and the players still not ready, connected ones first.
 static std::string SideLine(const Board& b, int side, uint64_t viewer) {
+  if (b.teamView) {
+    const TeamLine& t = b.teams[side == 3 ? 1 : 0];
+    std::string s = Font(side == 3 ? kCt : kT, side == 3 ? "<b>CT</b>" : "<b>T</b>");
+    if (!t.name.empty()) s += " " + HudEscape(t.name, 16);
+    if (t.st.ready) return s + " " + Font(kOk, "<b>&#10004; READY</b>");
+    return s + " " + Font(kNo, "&#10006; NOT READY") +
+           Font(kDim, " &#183; " + std::to_string(t.st.here) + "/" + std::to_string(t.st.total) + " here");
+  }
   std::vector<const Entry*> list;
   for (const auto& e : b.entries) {
     if (e.side == side && !e.ready) list.push_back(&e);
@@ -239,18 +272,45 @@ static std::string SideLine(const Board& b, int side, uint64_t viewer) {
 static std::string HudBrandText() { return FeatureEnabled(Feature::HudBrand) ? Cfg().hud_brand : std::string(); }
 
 static std::string ReadyHtml(const Board& b, uint64_t viewer, const std::string& footer) {
+  const Entry* me = nullptr;
+  for (const auto& e : b.entries) {
+    if (e.sid == viewer) me = &e;
+  }
   std::string h;
-  h.reserve(768);
+  h.reserve(1024);
+  // The viewer's own state first and big: players missed the small line under the
+  // names and sat in warmup not knowing they were the one holding it up.
+  if (b.teamView && me) {
+    const TeamHudState& st = b.teams[me->side == 3 ? 1 : 0].st;
+    const std::string n = std::to_string(st.total);
+    if (st.ready) {
+      h += "<font class='fontSize-l' color='" + std::string(kOk) + "'><b>YOUR TEAM IS READY</b></font><br>";
+    } else if (st.allHere) {
+      h += "<font class='fontSize-xl' color='" + std::string(kNo) + "'><b>YOUR TEAM IS NOT READY</b></font><br>";
+      h += Font(kGold, "type <b>.r</b> to ready your whole team") + "<br>";
+    } else {
+      h += "<font class='fontSize-xl' color='" + std::string(kNo) + "'><b>WAITING FOR YOUR TEAM (" +
+           std::to_string(st.here) + "/" + n + " here)</b></font><br>";
+      h += Font(kGold, "one <b>.r</b> readies everyone once all " + n + " are in") + "<br>";
+    }
+  } else if (me && !me->ready) {
+    h += "<font class='fontSize-xl' color='" + std::string(kNo) + "'><b>YOU ARE NOT READY</b></font><br>";
+    h += Font(kGold, "type <b>.r</b> in chat to ready up") + "<br>";
+  } else if (me) {
+    h += "<font class='fontSize-l' color='" + std::string(kOk) + "'><b>YOU ARE READY</b></font><br>";
+  }
   h += HudHeader(HudBrandText(), b.statusColor, b.status) + "<br>";
   h += ReadyHudCountLine(b.ready, b.total) + "<br>";
   h += "<font class='fontSize-sm'>" + SideLine(b, 3, viewer) + "</font><br><font class='fontSize-sm'>" +
        SideLine(b, 2, viewer) + "</font><br>";
 
-  ReadyViewer me = ReadyViewer::Absent;
-  for (const auto& e : b.entries) {
-    if (e.sid == viewer) me = e.ready ? ReadyViewer::Ready : ReadyViewer::NotReady;
+  // A viewer who is not ready has the big line above; the small one only says how to cancel or why
+  // nothing is asked of them.
+  if (!me) {
+    h += ReadyHudViewerLine(ReadyViewer::Absent, b.scrim);
+  } else if (me->ready) {
+    h += ReadyHudViewerLine(ReadyViewer::Ready, b.scrim);
   }
-  h += ReadyHudViewerLine(me, b.scrim);
   if (!b.note.empty()) h += "<br>" + Font(kGrey, b.note);
   if (!footer.empty()) h += "<br>" + footer;
   return h;
@@ -304,13 +364,16 @@ static std::string LiveHtml(const LiveHudInfo& l, const std::string& brand) {
       auto mark = [&](bool ok, const std::string& n) { return Font(ok ? kOk : kDim, (ok ? "&#10004; " : "&#10006; ") + HudEscape(n, 16)); };
       h += "<br>" + Font(kGrey, l.bothRequired ? "both teams: " : "pausing team: ") + "<b>.unpause</b><br>" +
            mark(l.team1Confirmed, l.team1) + " &#183; " + mark(l.team2Confirmed, l.team2);
-    } else if (l.type == "halftime" || l.type == "auto_5v5" || l.type == "restore") {
+    } else if (l.type == "halftime" || l.type == "auto_5v5" || l.type == "restore" ||
+               l.type == "engine") {
       // Pauses that belong to nobody (an engine pause, or a round restore): both teams resume
       // them (match_features.h).
       if (l.type == "halftime") {
         h += HudHeader(brand, kGold, "HALFTIME PAUSE");
       } else if (l.type == "restore") {
         h += HudHeader(brand, kGold, "ROUND RESTORED");
+      } else if (l.type == "engine") {
+        h += HudHeader(brand, kNo, "GAME PAUSED");
       } else {
         h += HudHeader(brand, kNo, "NOT 5v5 - PAUSED");
         if (!l.byTeam.empty()) h += "<br>" + Font(kGrey, HudEscape(l.byTeam, 24) + " is short");

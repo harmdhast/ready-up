@@ -1,6 +1,7 @@
 // Match half of the old core game_events.cpp (see match_events.h). Engine access goes through
 // ru_api only: event fields via ev_get_*, controllers via entity_by_index / schema_offset.
 #include "readyup/match_events.h"
+#include "readyup/round_economy.h"
 #include "readyup/match_recovery.h"
 
 #include "readyup/backup_files.h"
@@ -22,6 +23,7 @@
 #include "readyup/welcome.h"
 
 #include <algorithm>
+#include <string>
 #include <atomic>
 #include <chrono>
 #include <climits>
@@ -36,6 +38,34 @@
 #include <vector>
 
 namespace readyup {
+
+namespace {
+// Overtime N starts: say how it is played and what happens if it stays tied, so nobody is
+// surprised by a map decided on damage.
+void AnnounceOvertimeRules(int overtimeNumber, int seg) {
+  const auto ctx = WebhookGetMatchContext();
+  if (!ctx) return;
+  std::string msg = "Ready Up: OVERTIME " + std::to_string(overtimeNumber) + ": " + std::to_string(2 * seg) +
+                    " rounds, first to " + std::to_string(seg + 1) + " wins it.";
+  if (ctx->maxOvertimes > 0) {
+    const int left = ctx->maxOvertimes - overtimeNumber;
+    if (left > 0) {
+      msg += " Up to " + std::to_string(ctx->maxOvertimes) + " overtimes (" + std::to_string(left) + " more after this).";
+    } else {
+      msg += " This is the last overtime.";
+    }
+    if (ctx->damageTiebreakEnabled) {
+      msg += " Still tied after it: the team with more total damage wins the map";
+      msg += ctx->suddenDeathOnDamageTie ? " (equal damage: the next round decides)." : ".";
+    } else {
+      msg += " Still tied after it: the map is a draw.";
+    }
+  }
+  // Until the overtime's first round starts: in chat and in the middle of the screen.
+  SendImportantToChat(msg.c_str(), 15);
+}
+}  // namespace
+
 namespace {
 
 const ru_api* A() { return host::Api(); }
@@ -567,7 +597,10 @@ void OnRoundStartLocked(const PendingRound& ev) {
       }
     }
 
-    if (emitOvertimeStart && overtimeNumber > 0) WebhookEmitOvertimeStarted(mapNumber, overtimeNumber);
+    if (emitOvertimeStart && overtimeNumber > 0) {
+      WebhookEmitOvertimeStarted(mapNumber, overtimeNumber);
+      AnnounceOvertimeRules(overtimeNumber, seg);
+    }
 
     // Every half start implies a side swap (except the very first half).
     if (emitHalfStart) {
@@ -622,6 +655,16 @@ void OnRoundEndLocked(const PendingRound& ev) {
   EmitRoundEndLocked(ev.winner, ev.reason, ev.roundTimeMs);
 }
 
+// Damage and kills count against the other side only: a teamkill, team damage or a player hurting
+// themselves (a grenade) is not a kill or ADR (a teamkill showed as ADR 81, 2026-10-15).
+bool Enemies(int attackerSlot, int victimSlot) {
+  if (attackerSlot < 0 || victimSlot < 0 || attackerSlot == victimSlot) return false;
+  const auto ta = GetCsTeamNumForSlot(attackerSlot);
+  const auto tv = GetCsTeamNumForSlot(victimSlot);
+  if (!ta || !tv) return true;  // unknown side: count it, as before
+  return *ta != *tv;
+}
+
 void OnPlayerDeathLocked(const ru_game_event* ev) {
   const ru_api* a = A();
   const int attackerSlot = a->ev_get_player_slot(a->self, ev, "attacker");
@@ -632,7 +675,7 @@ void OnPlayerDeathLocked(const ru_game_event* ev) {
   const auto victimSid = SteamForSlot(victimSlot);
   const auto assisterSid = SteamForSlot(assisterSlot);
 
-  if (attackerSid) {
+  if (attackerSid && Enemies(attackerSlot, victimSlot)) {
     auto& s = g_stats[*attackerSid];
     const std::string nm = NameForSlot(attackerSlot);
     if (!nm.empty()) s.name = nm;
@@ -647,7 +690,8 @@ void OnPlayerDeathLocked(const ru_game_event* ev) {
     s.team = TeamForSteam(*victimSid);
     s.deaths += 1;
   }
-  if (assisterSid && attackerSid && victimSid && *assisterSid != *attackerSid && *assisterSid != *victimSid) {
+  if (assisterSid && attackerSid && victimSid && *assisterSid != *attackerSid && *assisterSid != *victimSid &&
+      Enemies(assisterSlot, victimSlot)) {
     auto& s = g_stats[*assisterSid];
     const std::string nm = NameForSlot(assisterSlot);
     if (!nm.empty()) s.name = nm;
@@ -662,6 +706,7 @@ void OnPlayerHurtLocked(const ru_game_event* ev) {
   const int dmg = a->ev_get_int(a->self, ev, "dmg_health", 0);
   const auto attackerSid = SteamForSlot(attackerSlot);
   if (!attackerSid) return;
+  if (!Enemies(attackerSlot, a->ev_get_player_slot(a->self, ev, "userid"))) return;
   auto& s = g_stats[*attackerSid];
   const std::string nm = NameForSlot(attackerSlot);
   if (!nm.empty()) s.name = nm;
@@ -690,7 +735,9 @@ void OnGameEvent(void* /*user*/, const char* name, const ru_game_event* ev) {
   if (std::strcmp(name, "round_start") == 0) {
     WelcomeObserveRoundStart();     // the cards wait it out
     GoLiveCardObserveRoundStart();  // (golive_card.h)
+    RoundEconomyOnRoundStart();     // money at the start (round_economy.h)
   }
+  if (std::strcmp(name, "round_freeze_end") == 0) RoundEconomyOnFreezeEnd();  // the buys
   if (std::strcmp(name, "round_start") == 0 || std::strcmp(name, "round_freeze_end") == 0) {
     MatchFeaturesOnGameEvent(name);  // freeze time tracking for pauses (match_features.h)
     if (name[6] == 'f') {
@@ -839,6 +886,15 @@ std::optional<int> GetCsTeamNumForSlot(int slot) {
     if (b.userid == slot) return (b.team == 2 || b.team == 3) ? std::optional<int>(b.team) : std::nullopt;
   }
   return std::nullopt;
+}
+
+std::optional<int> EngineTeamForSlot(int slot) {
+  if (slot < 0 || !host::OnGameThread() || !Off().teamNum) return std::nullopt;
+  void* c = ControllerForSlot(slot);
+  if (!c) return std::nullopt;
+  const auto v = ReadAt<uint8_t>(c, *Off().teamNum);
+  if (!v || *v > 3) return std::nullopt;
+  return static_cast<int>(*v);
 }
 
 std::pair<int, int> GetRosterTeamDamageTotals() {

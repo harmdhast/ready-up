@@ -1,7 +1,7 @@
 #pragma once
 
 // ru_api 1.13: player_change_team, player_teleport, entity_create, entity_spawn and
-// engine_feature_available; 1.14: player_respawn.
+// engine_feature_available; 1.16: player_respawn.
 //
 // Like grenade_spawn (grenades.h), the engine functions come from the practice gamedata fragment
 // (gamedata/engine-surface.practice.json), which ships only with the practice plugin:
@@ -24,6 +24,9 @@ bool Available(const char* feature);
 
 // The player in `slot` joins `team` (1 = spectators, 2 = T, 3 = CT), as jointeam does.
 bool ChangeTeam(int slot, int team, std::string* why);
+// The controller's team now (m_iTeamNum: 0 none, 1 spectators, 2 T, 3 CT), or -1 when `slot` is
+// not a player or the schema is not ready.
+int TeamOf(int slot);
 
 // The live pawn of `slot`: new origin / view angles (pitch, yaw, roll) / velocity; a null part is
 // left alone.

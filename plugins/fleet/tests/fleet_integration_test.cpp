@@ -228,6 +228,14 @@ TEST(TestEnrollConnectPingAck) {
   CHECK(p.WaitFor([&] { return p.MessagesOfType("ping").size() >= 2; }, 3000));
   const auto ping = p.MessagesOfType("ping").at(0);
   CHECK(ping.payload()->Get("health") && ping.payload()->Get("health")->Get("spool_msgs"));
+  CHECK(ping.payload()->Get("health")->Get("steamids") == nullptr);  // nobody on: left out
+  // Connected humans ride along, so the platform can send their skins without a match.
+  c.UpdateHealth(1, 0.0, {76561198000000001ULL});
+  const size_t pingsBefore = p.MessagesOfType("ping").size();
+  CHECK(p.WaitFor([&] { return p.MessagesOfType("ping").size() > pingsBefore; }, 3000));
+  const auto withIds = p.MessagesOfType("ping").back();
+  CHECK_EQ(withIds.payload()->Get("health")->Get("steamids")->a.at(0).AsStr(), std::string("76561198000000001"));
+  c.UpdateHealth(0, 0.0);
   CHECK(p.WaitFor([&] { return c.Status().rttMs >= 0; }, 2000));  // our ping got the mock's pong
   // platform ping -> our pong carries t and ref
   CHECK(p.SendToServer("ping", R"({"t":424242})", false));
@@ -640,7 +648,8 @@ TEST(TestBulkLanePriority) {
     ++i;
   }
   CHECK(evAt >= 0 && firstChunk > evAt);
-  CHECK(c.Status().bulkSent >= 3);
+  // The counter goes up after the write returns, so the platform can read chunk 3 first.
+  CHECK(p.WaitFor([&] { return c.Status().bulkSent >= 3; }, 3000));
   CheckSchemas(p);
   c.Stop();
   p.Stop();

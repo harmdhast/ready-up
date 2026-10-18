@@ -1,4 +1,5 @@
 #include "readyup/server_game_clients_hook.h"
+#include "readyup/plugin_loader.h"
 
 #include "readyup/ccommand.h"
 #include "readyup/chat_intercept.h"
@@ -76,6 +77,13 @@ static void Hook_ClientCommand(void* thisptr, CPlayerSlot slot, const void* args
     for (size_t i = 1; i < argv->size(); ++i) line += " " + (*argv)[i];
     Debug("client-command: console `ru` from slot %d: \"%s\"\n", slotNum, line.c_str());
     RouteChatCommand(ident->steamid64, ident->name, line, slotNum);
+    return;
+  }
+
+  // A plugin may refuse the command (the match plugin's team lock refuses `jointeam`).
+  if (cmd != "say" && cmd != "say_team" &&
+      plugins::FilterClientCommand(slotNum, ident ? ident->steamid64 : 0ull, *argv)) {
+    Debug("client-command: slot %d `%s` blocked by a plugin\n", slotNum, cmd.c_str());
     return;
   }
 

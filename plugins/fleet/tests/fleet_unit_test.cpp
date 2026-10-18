@@ -524,7 +524,8 @@ TEST(TestPublicAddr) {
   CHECK_EQ(PickPublicAddr("bad host", {"198.51.100.4:27100"}, 27055), std::string("198.51.100.4:27100"));
 }
 
-// The commands fleet.so runs itself (fleet_cmds.h): plugins.set, whitelist.set, practice.set, say.
+// The commands fleet.so runs itself (fleet_cmds.h): plugins.set, whitelist.set, practice.set, say,
+// tv.set (args checked by tv.so).
 TEST(TestOwnedCmds) {
   auto J = [](const char* text) {
     json::Value v;
@@ -532,7 +533,7 @@ TEST(TestOwnedCmds) {
     return v;
   };
   using namespace fleet::cmds;
-  CHECK(OwnedByFleet("plugins.set") && OwnedByFleet("practice.set") && OwnedByFleet("say"));
+  CHECK(OwnedByFleet("plugins.set") && OwnedByFleet("practice.set") && OwnedByFleet("say") && OwnedByFleet("tv.set"));
   CHECK(!OwnedByFleet("pause") && !OwnedByFleet("settings.set") && !OwnedByFleet("exec"));
 
   std::vector<std::string> on, off;
@@ -564,14 +565,47 @@ TEST(TestOwnedCmds) {
   CHECK(ParsePracticeSet(J(R"({"always": false})"), &pon, &palways, &err) && pon == -1 && palways == 0);
   CHECK(!ParsePracticeSet(J(R"({})"), &pon, &palways, &err));
   CHECK(!ParsePracticeSet(J(R"({"on": 1})"), &pon, &palways, &err));
+  {
+    bool hasHome = false;
+    std::string home;
+    CHECK(ParsePracticeSet(J(R"({"home_map": "3070284539"})"), &pon, &palways, &err, &hasHome, &home) && hasHome &&
+          home == "3070284539" && pon == -1 && palways == -1);
+    CHECK(ParsePracticeSet(J(R"({"home_map": ""})"), &pon, &palways, &err, &hasHome, &home) && hasHome && home.empty());
+    CHECK(!ParsePracticeSet(J(R"({"home_map": "de_dust2; quit"})"), &pon, &palways, &err, &hasHome, &home));
+    CHECK(!ParsePracticeSet(J(R"({"home_map": 5})"), &pon, &palways, &err, &hasHome, &home));
+    bool hasCvars = false;
+    std::vector<std::string> cvars;
+    CHECK(ParsePracticeSet(J(R"({"home_cvars": ["sv_airaccelerate 150"]})"), &pon, &palways, &err, &hasHome, &home,
+                           &hasCvars, &cvars) &&
+          hasCvars && cvars.size() == 1 && !hasHome);
+    CHECK(!ParsePracticeSet(J(R"({"home_cvars": "sv_x 1"})"), &pon, &palways, &err, &hasHome, &home, &hasCvars, &cvars));
+  }
 
   CHECK_EQ(SanitizeSay("hi\x01 there\n"), std::string("hi there"));
+  CHECK_EQ(SayCenterHtml("Map 2: <b>Nuke</b> & \"more\""), std::string("Map 2: &lt;b&gt;Nuke&lt;/b&gt; &amp; &quot;more&quot;"));
+  CHECK(SayCenterSeconds(0) == 0 && SayCenterSeconds(-3) == 0 && SayCenterSeconds(5) == 5 && SayCenterSeconds(99) == 15);
   CHECK(SanitizeSay(std::string(300, 'x')).size() == 190);
   std::string utf;
   for (int i = 0; i < 100; ++i) utf += "\xc3\xa6";  // 'ae' x 100 = 200 bytes
   const std::string cut = SanitizeSay(utf);
   CHECK(cut.size() == 190);
   CHECK((static_cast<unsigned char>(cut.back()) & 0xC0) == 0x80);  // ends after a whole character
+
+  // say: up to 3 lines of 190 bytes, broken at a space; the admin prefix; team.
+  CHECK(SplitSay("  ").empty());
+  CHECK(SplitSay("hello").size() == 1 && SplitSay("hello")[0] == "hello");
+  {
+    std::string words;
+    for (int i = 0; i < 60; ++i) words += "word" + std::to_string(i % 10) + " ";  // 360 bytes
+    const auto lines = SplitSay(words);
+    CHECK(lines.size() == 2);
+    for (const auto& l : lines) CHECK(l.size() <= 190 && l.front() != ' ' && l.back() != ' ');
+    CHECK(SplitSay(std::string(1000, 'x')).size() == 3);
+    for (const auto& l : SplitSay(std::string(1000, 'x'))) CHECK(l.size() == 190);
+  }
+  CHECK_EQ(AdminSayLine("", "go"), std::string(" \x07[ADMIN]\x01 go"));
+  CHECK_EQ(AdminSayLine("Sivert", "go"), std::string(" \x07[ADMIN]\x01 \x10Sivert\x01: go"));
+  CHECK(SayTeam("") == 0 && SayTeam("team1") == 1 && SayTeam("team2") == 2 && SayTeam("ct") == -1);
 
   CHECK_EQ(ResultPayload(Ok(), ""), std::string(R"({"status":"ok"})"));
   CHECK_EQ(ResultPayload(Rejected("unsupported", "no match.so"), "a1"),

@@ -35,6 +35,11 @@ typedef struct ru_practice_v1 {
    * set again; on = 1 also switches practice on when nothing blocks it. Returns 1 when stored. */
   int (*always)(void);
   int (*set_always)(int on);
+  /* Appended (check struct_size): settings applied whenever the server is on its home map (the
+   * essentials default map for "practice"), after practice's own cfg: "sv_/mp_<name> <number>"
+   * lines, at most 24 (a surf map needs sv_airaccelerate 150 ...). n = 0 clears them. Stored in
+   * the data dir (home_cvars.txt). Returns 1 when stored; 0 for an invalid line or a write error. */
+  int (*set_home_cvars)(const char* const* lines, uint32_t n);
 } ru_practice_v1;
 
 #ifdef __cplusplus

@@ -20,6 +20,9 @@ namespace readyup {
 void SendToChat(const char* msg);
 // Chat to everyone, no prefix (payload may carry CS2 color bytes). Any thread.
 void SendRawToChat(const char* payload);
+// A line nobody may miss (overtime rules, a map decided on damage): gold, three times in chat
+// (RU_CHAT_IMPORTANT), and in the center of the screen for `centerSeconds`. Any thread.
+void SendImportantToChat(const char* msg, int centerSeconds = 12);
 // Debug chat (readyup.cfg chat_debug=1 and debug=1 only). Any thread.
 void AnnounceToChat(const char* msg);
 // Chat to one player slot. Any thread (queued: then always true).
@@ -75,7 +78,7 @@ bool ForceJoinTeamForSlot(int slot, int joinTeam);
 // (CCSPlayerController::ChangeTeam from the practice gamedata). False when the core or this CS2
 // build does not have it. Game thread.
 bool MoveSlotToSpectators(int slot);
-// Whether ru_api 1.14 player_respawn works on this core and CS2 build. Game thread.
+// Whether ru_api 1.16 player_respawn works on this core and CS2 build. Game thread.
 bool RespawnAvailable();
 // The dead player in `slot` (on T / CT) respawns alone through player_respawn: 1 respawned,
 // 2 already alive, 0 refused or unavailable. Game thread.

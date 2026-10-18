@@ -18,6 +18,7 @@
 #include "readyup/demo_recorder.h"
 #include "readyup/engine.h"
 #include "readyup/esports.h"
+#include "readyup/roster_names.h"
 #include "readyup/fleet_bridge.h"
 #include "readyup/game_timers.h"
 #include "readyup/host.h"
@@ -46,17 +47,22 @@
 #include "readyup/ready_hud.h"
 #include "readyup/reload_state.h"
 #include "readyup/retention.h"
+#include "readyup/round_restore_rules.h"
 #include "readyup/scrim_flow.h"
 #include "readyup/votes.h"
 #include "readyup/webhook.h"
 #include "readyup/admin_call.h"
 #include "readyup/golive_card.h"
+#include "readyup/result_card.h"
 #include "readyup/welcome.h"
 #include "readyup/workers.h"
 
 #include <algorithm>
+#include <map>
 #include <atomic>
 #include <chrono>
+#include <ctime>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
@@ -179,40 +185,154 @@ void OnFrame(void*, const ru_tick_info*) {
   });
 }
 
+// Where a slow match tick spends its time (servers showed 8-10 ms ticks, 2026-10-13): each part
+// is timed, and a tick over kSlowTickMs logs its parts at most every kSlowTickLogSeconds.
+constexpr double kSlowTickMs = 4.0;
+constexpr double kSlowTickLogSeconds = 10.0;
+double g_lastSlowTickLog = -1e9;
+
+// Per-section totals since the last summary (game thread): `perf: match sections` every 5 minutes,
+// the average and worst wall time of each section per call, so the costly one stands out.
+struct SectionTotals {
+  double us = 0, maxUs = 0;
+  uint64_t calls = 0;
+};
+// Keyed by the section name literal (pointer): no string built per call.
+std::map<const char*, SectionTotals> g_sectionTotals;
+double g_lastSectionSummary = -1;
+constexpr double kSectionSummarySeconds = 300.0;
+
+void MaybeLogSectionSummary(double now) {
+  if (g_lastSectionSummary < 0) g_lastSectionSummary = now;
+  if (now - g_lastSectionSummary < kSectionSummarySeconds) return;
+  g_lastSectionSummary = now;
+  std::vector<std::pair<const char*, SectionTotals>> rows(g_sectionTotals.begin(), g_sectionTotals.end());
+  std::sort(rows.begin(), rows.end(), [](const auto& a, const auto& b) { return a.second.us > b.second.us; });
+  std::string line;
+  for (const auto& r : rows) {
+    if (r.second.calls == 0) continue;
+    char buf[96];
+    std::snprintf(buf, sizeof(buf), "%s%s avg %.1f max %.0f us", line.empty() ? "" : ", ", r.first,
+                  r.second.us / static_cast<double>(r.second.calls), r.second.maxUs);
+    line += buf;
+  }
+  g_sectionTotals.clear();
+  if (!line.empty()) Print("perf: match sections (5 min): %s\n", line.c_str());
+}
+
+class TickSections {
+ public:
+  template <typename F>
+  void Run(const char* name, F&& fn) {
+    const auto start = std::chrono::steady_clock::now();
+    const double cpu0 = ThreadCpuMs();
+    fn();
+    const double ms =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+    const double cpu = ThreadCpuMs() - cpu0;
+    total_ += ms;
+    cpuTotal_ += cpu;
+    if (count_ < kMax) parts_[count_++] = {name, ms, cpu};
+    SectionTotals& t = g_sectionTotals[name];
+    t.us += ms * 1000.0;
+    t.maxUs = std::max(t.maxUs, ms * 1000.0);
+    ++t.calls;
+  }
+  // Logs the parts of a slow tick (rate-limited).
+  void Report(double now) {
+    if (total_ < kSlowTickMs || now - g_lastSlowTickLog < kSlowTickLogSeconds) return;
+    g_lastSlowTickLog = now;
+    std::string line;
+    for (int i = 0; i < count_; ++i) {
+      if (parts_[i].ms < 0.05) continue;
+      char buf[80];
+      std::snprintf(buf, sizeof(buf), "%s%s %.2f (cpu %.2f)", line.empty() ? "" : ", ", parts_[i].name, parts_[i].ms,
+                    parts_[i].cpu);
+      line += buf;
+    }
+    // Wall time well above CPU time: the thread was waiting (the OS ran something else, or a lock),
+    // not working.
+    Print("perf: slow match tick %.2f ms (cpu %.2f): %s\n", total_, cpuTotal_, line.c_str());
+  }
+
+ private:
+  static constexpr int kMax = 24;
+  struct Part {
+    const char* name;
+    double ms;
+    double cpu;
+  };
+  // This thread's CPU time in ms (CLOCK_THREAD_CPUTIME_ID).
+  static double ThreadCpuMs() {
+    timespec ts{};
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts);
+    return static_cast<double>(ts.tv_sec) * 1e3 + static_cast<double>(ts.tv_nsec) / 1e6;
+  }
+  Part parts_[kMax] = {};
+  int count_ = 0;
+  double total_ = 0;
+  double cpuTotal_ = 0;
+};
+
 void OnTick(void*, const ru_tick_info* t) {
   Guard("tick", [&] {
+    TickSections s;
+    // Every tick: round events, the mode state machine (ready, go-live) and the fleet link. The rest
+    // is clock-driven (timeouts, cards, the HUD's own interval, votes) and runs on every 4th tick
+    // (16/s at 64 tick): a quarter of the per-frame work, nothing anyone can see.
+    const bool light = (t->frame & 3u) == 0;
     // Round events of this frame, after the core delivered this frame's log lines.
-    MatchEventsTick();
+    s.Run("events", [] { MatchEventsTick(); });
     if (FeatureEnabled(Feature::MatchFlow)) {
-      Tick();
-      SimulationTick(t->now);  // simulation mode: bots in/out, simulated ready, timescale (simulation.h)
-      ScrimTick();  // scrim flow + `state:` log; outside Tick() (which holds the modes mutex)
-      MatchFeaturesTick();  // tactical timeout end, technical auto-unpause, forfeit timer
-      DamageReportTick();       // damage reports built at round_end (damage_report.h)
-      VotesTick(t->now);        // .gg / .stop vote timeouts (votes.h)
-      WarmupMoneyTick(t->now);  // warmup money top-up (warmup_money.h)
-      WarmupScoreTick(t->now);  // no round counts in warmup (warmup_score.h)
-      WarmupAmmoTick();         // warmup reserve ammo (warmup_ammo.h)
-      match_settings::Tick(t->now);  // autoready, kick_when_no_match_loaded, hostname_format
-      WeaponCleanupTick(t->now);  // dropped weapons in warmup (weapon_cleanup.h)
-      CoachTick(t->now);          // coaches: m_iCoachingTeam, sv_coaching_enabled (coach.h)
+      s.Run("modes", [] { Tick(); });
+      if (light) {
+        s.Run("simulation", [&] { SimulationTick(t->now); });  // bots in/out, simulated ready (simulation.h)
+        s.Run("scrim", [] { ScrimTick(); });  // outside Tick() (which holds the modes mutex)
+        s.Run("features", [] { MatchFeaturesTick(); });  // timeouts, technical auto-unpause, forfeit timer
+        s.Run("damage", [] { DamageReportTick(); });     // damage reports built at round_end (damage_report.h)
+        s.Run("votes", [&] { VotesTick(t->now); });      // .gg / .stop vote timeouts (votes.h)
+        s.Run("warmup_money", [&] { WarmupMoneyTick(t->now); });  // warmup money top-up (warmup_money.h)
+        s.Run("warmup_score", [&] { WarmupScoreTick(t->now); });  // no round counts in warmup (warmup_score.h)
+        s.Run("warmup_ammo", [] { WarmupAmmoTick(); });           // warmup reserve ammo (warmup_ammo.h)
+        s.Run("settings", [&] { match_settings::Tick(t->now); });  // autoready, kick_when_no_match_loaded
+        s.Run("weapons", [&] { WeaponCleanupTick(t->now); });  // dropped weapons in warmup (weapon_cleanup.h)
+        s.Run("coach", [&] { CoachTick(t->now); });            // coaches (coach.h)
+      }
     }
     // Fleet link (no-op without fleet.so): platform handlers, MatchState patches, events.
-    fleet_bridge::Tick(t->now);
-    // One-off cards before the HUD: the HUD leaves a player's panel alone while one is up.
-    if (FeatureEnabled(Feature::MatchFlow)) GoLiveCardTick();  // "LIVE · GO GO GO" (golive_card.h)
-    HudSteadyTick();  // m_bGameRestart so center panels do not blink (hud_steady.h)
-    AdminCallTick();  // `.admin` cards for in-game admins (admin_call.h)
-    if (FeatureEnabled(Feature::WelcomeHtml)) WelcomeTick();
-    if (FeatureEnabled(Feature::ReadyHud)) ReadyHudTick();  // skips players whose welcome card is up
-    if (FeatureEnabled(Feature::ReadyHud)) ReadyHudAnimTick();  // `.ru hud anim`, every frame
-    PrefixTick(t->now);
+    s.Run("fleet", [&] { fleet_bridge::Tick(t->now); });
+    s.Run("hud_steady", [] { HudSteadyTick(); });  // m_bGameRestart so center panels do not blink (hud_steady.h)
+    if (light) {
+      // One-off cards before the HUD: the HUD leaves a player's panel alone while one is up.
+      if (FeatureEnabled(Feature::MatchFlow)) s.Run("golive_card", [] { GoLiveCardTick(); });
+      s.Run("result_card", [] { ResultCardTick(); });  // map / series result (result_card.h)
+      s.Run("admin_call", [] { AdminCallTick(); });  // `.admin` cards for in-game admins (admin_call.h)
+      if (FeatureEnabled(Feature::WelcomeHtml)) s.Run("welcome", [] { WelcomeTick(); });
+      if (FeatureEnabled(Feature::ReadyHud)) s.Run("ready_hud", [] { ReadyHudTick(); });  // skips welcome cards
+      s.Run("prefix", [&] { PrefixTick(t->now); });
+    }
+    // `.ru hud anim` moves every other tick (32/s): smooth enough, half the cost.
+    if (FeatureEnabled(Feature::ReadyHud) && (t->frame & 1u) == 0) s.Run("hud_anim", [] { ReadyHudAnimTick(); });
+    s.Report(t->now);
+    MaybeLogSectionSummary(t->now);
   });
+}
+
+// Players' chat (.r, .pause, ...) and their teams are read from the game log: a server whose
+// config never says `log on` (a hand-made server.cfg, a host panel's) wrote no log, so .r did
+// nothing at all (Discord, 2026-10-13). Ready Up turns it on itself, at load and on every map.
+void EnsureGameLogOn() {
+  if (EnqueueServerCommand("log on")) DebugLine("match: game log on (chat commands are read from it)");
+  else Print("match: could not queue `log on`; put `log on` in server.cfg or chat commands won't work\n");
 }
 
 void OnEvent(void*, const ru_event* e) {
   Guard("event", [&] {
+    if (e->type == RU_EVENT_PLAYER_CONNECT || e->type == RU_EVENT_PLAYER_DISCONNECT || e->type == RU_EVENT_PLAYER_TEAM) {
+      PlayersInvalidate();
+    }
     if (e->type == RU_EVENT_MAP_START) {
+      EnsureGameLogOn();
       IdleRefreshOnMapStart(host::NowSeconds());
       retention::SweepAsync();  // old round backups and demos (retention.h)
       EsportsOnMapStart();  // the GOTV client is looked for again
@@ -220,6 +340,7 @@ void OnEvent(void*, const ru_event* e) {
       fleet_bridge::OnMapStart();
       HudSteadyOnMapStart();  // cs_gamerules is a new entity
       match_recovery::OnMapStart();  // a recovery changing to the match map continues
+      ModesOnMapStart();  // the mode's rules again, also on a reload of the same map
       // Every map of a real match starts without bots: the gamemode cfg brings bot_quota back on
       // each level change, and a bot alive on a team kept a joining player spectating it (live
       // test, map 2). ApplyLoadedMatch did this only once, before the first map change.
@@ -237,6 +358,9 @@ void OnEvent(void*, const ru_event* e) {
     } else if (e->type == RU_EVENT_PLAYER_DISCONNECT) {
       // Ready state must not survive a reconnect.
       if (e->steamid64) ClearReady(e->steamid64);
+      if (e->steamid64) MatchFeaturesOnPlayerLeft(e->steamid64, e->name ? e->name : "");
+    } else if (e->type == RU_EVENT_PLAYER_CONNECT) {
+      if (e->steamid64) MatchFeaturesOnPlayerBack(e->steamid64, e->name ? e->name : "");
     } else if (e->type == RU_EVENT_PLAYER_TEAM && e->source == RU_SOURCE_ENGINE) {
       // Welcome card trigger (the log-line source comes through MatchObserveLogLine).
       if (e->team == 2 || e->team == 3) {
@@ -329,10 +453,25 @@ int SetExternalModeIface(const char* name) {
   Guard("set_external_mode", [&] { rc = MatchSetExternal(name ? name : "") ? 1 : 0; });
   return rc;
 }
-const ru_match_v1 g_matchIface = {sizeof(ru_match_v1), &GetStatus, &InventoryLockedIface, &RulesetIface,
-                                  &SetPracticeIface, &ModeIface, &MapStatsIface, &SetExternalModeIface};
+// v1.6: the roster team of a player (fleet.so `say {team}`).
+int RosterTeamIface(uint64_t steamid64) {
+  int rc = 0;
+  Guard("roster_team", [&] {
+    const auto ctx = WebhookGetMatchContext();
+    if (!ctx) return;
+    const auto it = ctx->roster_team.find(steamid64);
+    if (it == ctx->roster_team.end()) return;
+    rc = it->second == WebhookTeam::Team1 ? 1 : it->second == WebhookTeam::Team2 ? 2 : 0;
+  });
+  return rc;
+}
+const ru_match_v1 g_matchIface = {sizeof(ru_match_v1), &GetStatus,      &InventoryLockedIface, &RulesetIface,
+                                  &SetPracticeIface,   &ModeIface,      &MapStatsIface,        &SetExternalModeIface,
+                                  &RosterTeamIface};
 
 std::atomic<int> g_hudShowing{0}, g_hudFeature{0};
+// -allow_round_backup_files on this process's command line: -1 not read (or no /proc), 0 missing, 1 present.
+std::atomic<int> g_backupFlag{-1};
 std::mutex g_brandMu;
 std::string g_brandLine;
 
@@ -347,6 +486,14 @@ void RunSelftest(ru_selftest_add_fn add, void* ctx) {
       (std::string("showing=") + (g_hudShowing.load() ? "yes" : "no") + " (feature " +
        (g_hudFeature.load() ? "on" : "off") + ")")
           .c_str());
+  if (const int f = g_backupFlag.load(); f == 1) {
+    add(ctx, "OK", "round backups", "server started with -allow_round_backup_files");
+  } else if (f == 0) {
+    add(ctx, "WARN", "round backups",
+        (std::string("server started without -allow_round_backup_files: no round backups, .restore finds none. ") +
+         restore::BackupFlagHint())
+            .c_str());
+  }
   std::lock_guard<std::mutex> lk(g_brandMu);
   add(ctx, "INFO", "hud brand", g_brandLine.c_str());
 }
@@ -359,6 +506,16 @@ void SelftestRefresh(double now) {
   g_hudFeature.store(FeatureEnabled(Feature::ReadyHud) ? 1 : 0);
   if (now - g_lastSelftestRefresh < 60.0) return;
   g_lastSelftestRefresh = now;
+  if (g_backupFlag.load() < 0) {  // the command line never changes: read it once (Linux only)
+    if (std::FILE* f = std::fopen("/proc/self/cmdline", "rb")) {
+      std::string raw;
+      char b[4096];
+      size_t n;
+      while ((n = std::fread(b, 1, sizeof(b), f)) > 0 && raw.size() < (1u << 20)) raw.append(b, n);
+      std::fclose(f);
+      if (!raw.empty()) g_backupFlag.store(restore::CmdlineHasArg(raw, restore::kRoundBackupFlag) ? 1 : 0);
+    }
+  }
   const auto c = Cfg();
   const std::string header = HudBrandHtml(24, "fontSize-l");
   char buf[512];
@@ -372,6 +529,7 @@ void SelftestRefresh(double now) {
 }
 
 void OnSlowTick(void*, const ru_tick_info* t) {
+  if ((t->frame & 15u) != 0) return;  // four times a second is plenty for selftest state
   Guard("selftest refresh", [&] { SelftestRefresh(t->now); });
 }
 
@@ -385,13 +543,22 @@ extern "C" {
 READYUP_PLUGIN_EXPORT const ru_plugin_info* readyup_plugin_info(void) {
   static const ru_plugin_info info = {
       sizeof(ru_plugin_info),
-      (1u << 16) | 2u,  // requires 1.2 (log_untagged, ru subcommands, on_frame, ...); 1.3 members via RU_API_HAS
+      (1u << 16) | 16u,  // requires 1.16 (player_respawn sits at the 1.16 offset; a core with another layout refuses it); older members via RU_API_HAS
       "match",
       MATCH_VERSION,
       "Ready Up",
       "match flow: ready-up, scrims, knife, pauses, votes, match configs, webhooks, demos, stats",
   };
   return &info;
+}
+
+// `jointeam <team>` (the team menu sends it too): refused for a roster player whose team is
+// locked; they are told why.
+static int OnJoinTeam(void*, int slot, uint64_t steamid64, const char*, int argc, const char* const* argv) {
+  const int team = argc > 1 ? std::atoi(argv[1]) : 0;
+  if (!TeamLockRefusesJoin(steamid64, team)) return 0;
+  ClientPrintChat(slot, "Ready Up: teams are locked for this match.");
+  return 1;
 }
 
 READYUP_PLUGIN_EXPORT int readyup_plugin_load(const ru_api* api, uint32_t core_api_version) {
@@ -414,6 +581,7 @@ READYUP_PLUGIN_EXPORT int readyup_plugin_load(const ru_api* api, uint32_t core_a
 
     // Commands: player chat, `ru <sub>` / `.ru <sub>`, console settings, `tv_delay` observer.
     RegisterReadyCommands();
+    EnsureGameLogOn();  // chat commands are read from the game log
     for (const auto& sub : MatchRuSubcommands()) {
       if (!api->register_ru_subcommand(api->self, sub.c_str(), &OnRuSub, nullptr)) {
         Print("match: could not register `ru %s`\n", sub.c_str());
@@ -432,6 +600,12 @@ READYUP_PLUGIN_EXPORT int readyup_plugin_load(const ru_api* api, uint32_t core_a
       }
     }
 
+    // The team lock (api 1.14): roster players cannot switch team at all during a match.
+    if (RU_API_HAS(api, filter_client_command)) {
+      if (!api->filter_client_command(api->self, "jointeam", &OnJoinTeam, nullptr)) {
+        Print("match: could not filter jointeam (team lock falls back to moving players back)\n");
+      }
+    }
     api->on_frame(api->self, &OnFrame, nullptr);
     api->on_tick(api->self, &OnTick, nullptr);
     api->on_tick(api->self, &OnSlowTick, nullptr);
@@ -444,6 +618,7 @@ READYUP_PLUGIN_EXPORT int readyup_plugin_load(const ru_api* api, uint32_t core_a
     WarmupScoreInstall(api);    // warmup score reset
     WeaponCleanupInstall(api);  // dropped weapons in warmup
     EsportsInstall(api);  // default_models (player_spawn), halftime pause
+    RosterNamesInstall(api);  // roster players' in-game names
     api->set_admin_provider(api->self, &AdminProvider, nullptr);
     api->provide_interface(api->self, RU_MATCH_IFACE_NAME, RU_MATCH_IFACE_VERSION, const_cast<ru_match_v1*>(&g_matchIface));
     api->provide_interface(api->self, RU_SELFTEST_IFACE_PREFIX "match", RU_SELFTEST_IFACE_VERSION,
@@ -483,6 +658,7 @@ READYUP_PLUGIN_EXPORT void readyup_plugin_unload(void) {
   try {
     // Without the match flow nothing may keep rounds from ending.
     if (g_api) g_api->set_round_termination_suppressed(g_api->self, 0);
+    RosterNamesUninstall();  // players get their own names back
     workers::Shutdown();  // webhook sender, store writer (saves what is pending), admin refresh, demo uploads, ...
     ReloadStateSave();
     fleet_bridge::Uninstall();  // fleet.so cannot see this plugin unload (fleet_iface.h)

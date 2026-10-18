@@ -25,6 +25,9 @@ uint64_t g_gen = 1;
 
 bool QueryableName(const std::string& n) {
   if (n.empty() || n.size() > 63) return false;
+  // Reading a cvar makes the engine print its value to the console log: never a password
+  // (tv_password; docs/design/tv-plugin.md). Such a cvar is not restored after the match.
+  if (n.find("password") != std::string::npos) return false;
   for (unsigned char c : n) {
     if (!(std::isalnum(c) != 0 || c == '_' || c == '.')) return false;
   }

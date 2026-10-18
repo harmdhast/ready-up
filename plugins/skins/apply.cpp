@@ -1,3 +1,4 @@
+#include "knife_swap.h"
 #include "skins.h"
 
 #include "apply_internal.h"
@@ -10,6 +11,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 // Weapon skins + knives, driven from the plugin's on_tick (the core's GameFrame hook).
@@ -125,6 +127,10 @@ uint64_t NextItemId() {
   return ++next;
 }
 
+// The stock knives' item definitions: CT's "weapon_knife" and T's "weapon_knife_t".
+constexpr int kStockKnifeCt = kStockKnifeCtDef;
+constexpr int kStockKnifeT = kStockKnifeTDef;
+
 bool IsKnifeDesigner(const char* dn) {
   if (!dn) return false;
   return std::strncmp(dn, "weapon_knife", 12) == 0 || std::strcmp(dn, "weapon_bayonet") == 0;
@@ -141,7 +147,9 @@ int ItemInitializedOffset() { return Off().item_initialized; }
 
 // Writes paint/seed/wear/StatTrak/nametag onto an econ item view + the owning entity's fallback
 // fields. Used for weapons (owner = the weapon entity) and gloves (owner = nullptr).
-void WritePaint(void* ownerEconEntity, void* itemView, uint64_t steamid64, const WeaponSkinEntry& skin) {
+uint64_t ItemIdOf(void* itemView) { return Rd<uint64_t>(itemView, Off().item_id); }
+
+uint64_t WritePaint(void* ownerEconEntity, void* itemView, uint64_t steamid64, const WeaponSkinEntry& skin) {
   auto& o = Off();
   const uint64_t itemId = NextItemId();
   Wr<uint64_t>(itemView, o.item_id, itemId);
@@ -174,6 +182,7 @@ void WritePaint(void* ownerEconEntity, void* itemView, uint64_t steamid64, const
     std::memcpy(dst, skin.nametag.data(), n);
     dst[n] = '\0';
   }
+  return itemId;
 }
 
 void* EconItemViewOfWeapon(void* weapon) {
@@ -185,10 +194,18 @@ void* EconItemViewOfWeapon(void* weapon) {
 
 using detail::EconItemViewOfWeapon;
 using detail::WritePaint;
+using detail::ItemIdOf;
 
 namespace {
 
 enum class WeaponResult { kDone, kRetry };
+
+// Set by ProcessWeapon when it swapped a knife to another knife (ChangeSubclass) this call.
+bool g_lastSwappedKnife = false;
+// Knife entities whose knife we swapped in (knife_swap.h): only those go back to stock.
+KnifeSwapLedger g_knifeSwaps;
+// What we last painted on each weapon (by entity handle): the same paint is not written again.
+std::unordered_map<uint32_t, PaintStamp> g_weaponStamps;
 
 // Paint kits with items_game `use_legacy_model 1` (CS:GO-era UVs). In CS2 they only render
 // correctly on the weapon's legacy model: bodygroup "body" = 1 (what WeaponPaints does with
@@ -233,7 +250,11 @@ std::unordered_map<uint64_t, WeaponSkinEntry> g_paintOverride;
 std::unordered_map<uint64_t, std::string> g_overrideNameTag;  // set_player_name_tag
 long long g_applied = 0;  // weapons painted / knives swapped this session (for skins_status)
 
-WeaponResult ProcessWeapon(void* weapon, uint64_t steamid64, int team, bool late, bool* legacyPending) {
+// force: write the paint even when the weapon already has it (the planned repaint of a swapped
+// knife a quarter second later, which the client needs).
+WeaponResult ProcessWeapon(void* weapon, uint64_t steamid64, int team, bool late, bool* legacyPending,
+                           bool force = false) {
+  g_lastSwappedKnife = false;
   auto& o = Off();
   const bool isKnife = IsKnifeDesigner(EntityDesignerName(weapon));
   const auto ov = g_paintOverride.find(steamid64);
@@ -257,47 +278,85 @@ WeaponResult ProcessWeapon(void* weapon, uint64_t steamid64, int team, bool late
   if (defindex <= 0) return WeaponResult::kDone;
 
   bool changed = false;
+  bool swappedKnife = false;
   int paintUsed = 0;
   float wearUsed = 0.0f;
   const bool fromOverride = ov != g_paintOverride.end();
-  if (isKnife) {
-    if (const auto want = FindKnifeClassname(steamid64, team)) {
-      if (const auto wantDef = KnifeClassnameToDefindex(*want)) {
-        if (*wantDef != defindex) {
-          // Same as the "ChangeSubclass" input / `subclass_change <defindex>`: swaps weapon VData
-          // (model, animations) to the chosen knife.
-          if (ChangeSubclass(weapon, std::to_string(*wantDef).c_str())) {
-            Wr<uint16_t>(item, o.item_defIndex, static_cast<uint16_t>(*wantDef));
-            defindex = *wantDef;
-            changed = true;
-          } else if (DebugOn()) {
-            Log(RU_LOG_DEBUG, "ChangeSubclass unavailable; keeping default knife for %llu",
-                  static_cast<unsigned long long>(steamid64));
-          }
-        }
-        // Quality 3 = "unusual" (the ★ prefix); non-default knives always carry it.
-        Wr<int32_t>(item, o.item_quality, 3);
+  const uint32_t handle = g_api->entity_handle_of(g_api->self, weapon);
+  // One paint write, skipped when this weapon already shows exactly this paint from us.
+  auto paintOnce = [&](const WeaponSkinEntry& paint) {
+    if (!force && !swappedKnife && handle != 0xFFFFFFFFu) {
+      const auto st = g_weaponStamps.find(handle);
+      if (st != g_weaponStamps.end() &&
+          StampMatches(st->second, ItemIdOf(item), defindex, paint.paint_id, paint.seed, paint.wear)) {
+        return false;
       }
     }
+    const uint64_t id = WritePaint(weapon, item, steamid64, paint);
+    if (handle != 0xFFFFFFFFu) g_weaponStamps[handle] = PaintStamp{id, defindex, paint.paint_id, paint.seed, paint.wear};
+    return true;
+  };
+  if (isKnife) {
+    std::optional<int> wantDef;
+    if (const auto want = FindKnifeClassname(steamid64, team)) wantDef = KnifeClassnameToDefindex(*want);
+    switch (DecideKnife(wantDef, defindex, handle != 0xFFFFFFFFu && g_knifeSwaps.Swapped(handle, steamid64))) {
+      case KnifeAction::Swap:
+        // Same as the "ChangeSubclass" input / `subclass_change <defindex>`: swaps weapon VData
+        // (model, animations) to the chosen knife.
+        if (ChangeSubclass(weapon, std::to_string(*wantDef).c_str())) {
+          Wr<uint16_t>(item, o.item_defIndex, static_cast<uint16_t>(*wantDef));
+          defindex = *wantDef;
+          changed = true;
+          swappedKnife = true;
+          g_lastSwappedKnife = true;
+          if (handle != 0xFFFFFFFFu) g_knifeSwaps.MarkSwapped(handle, steamid64);
+        } else if (DebugOn()) {
+          Log(RU_LOG_DEBUG, "ChangeSubclass unavailable; keeping default knife for %llu",
+                static_cast<unsigned long long>(steamid64));
+        }
+        break;
+      case KnifeAction::RevertStock: {
+        // No platform knife equipped any more, on a knife we swapped in: the stock knife, not the
+        // last one swapped in (unequipping left the old knife in hand, NTLAN, 2026-10-16). A knife
+        // the game gave (the player's Steam inventory knife) never gets here.
+        const int stock = team == 2 ? kStockKnifeT : kStockKnifeCt;
+        if (ChangeSubclass(weapon, std::to_string(stock).c_str())) {
+          Wr<uint16_t>(item, o.item_defIndex, static_cast<uint16_t>(stock));
+          Wr<int32_t>(item, o.item_quality, 0);
+          defindex = stock;
+          changed = true;
+          g_knifeSwaps.Forget(handle);
+        }
+        break;
+      }
+      case KnifeAction::Keep: break;
+    }
+    // Quality 3 = "unusual" (the ★ prefix); non-default knives always carry it.
+    if (wantDef) Wr<int32_t>(item, o.item_quality, 3);
   }
 
   if (ov != g_paintOverride.end()) {
     WeaponSkinEntry paint = ov->second;
-    if (ownPaint) {  // the loadout's skin for this weapon (stock when none), with the override's name tag
+    bool write = true;
+    if (ownPaint) {  // the loadout's skin for this weapon, with the override's name tag
       const auto own = FindWeaponSkin(steamid64, team, defindex);
       paint = own ? *own : WeaponSkinEntry{};
-      if (paint.paint_id < 0) paint.paint_id = 0;
+      // No platform skin for it: the weapon keeps what the game gave (the player's Steam
+      // inventory skin, or stock). Writing paint 0 replaced Steam skins with stock (2026-10-17).
+      write = paint.paint_id > 0;
     }
-    const auto tag = g_overrideNameTag.find(steamid64);
-    if (tag != g_overrideNameTag.end()) paint.nametag = tag->second;
-    WritePaint(weapon, item, steamid64, paint);
-    paintUsed = paint.paint_id;
-    wearUsed = paint.wear;
-    changed = true;
-    if (IsLegacyPaintKit(paint.paint_id) && !ApplyLegacyBody(weapon, steamid64)) *legacyPending = true;
+    if (write) {
+      const auto tag = g_overrideNameTag.find(steamid64);
+      if (tag != g_overrideNameTag.end()) paint.nametag = tag->second;
+      if (paintOnce(paint)) {
+        paintUsed = paint.paint_id;
+        wearUsed = paint.wear;
+        changed = true;
+        if (IsLegacyPaintKit(paint.paint_id) && !ApplyLegacyBody(weapon, steamid64)) *legacyPending = true;
+      }
+    }
   } else if (const auto skin = FindWeaponSkin(steamid64, team, defindex)) {
-    if (skin->paint_id > 0) {
-      WritePaint(weapon, item, steamid64, *skin);
+    if (skin->paint_id > 0 && paintOnce(*skin)) {
       paintUsed = skin->paint_id;
       wearUsed = skin->wear;
       changed = true;
@@ -306,11 +365,14 @@ WeaponResult ProcessWeapon(void* weapon, uint64_t steamid64, int team, bool late
   }
 
   if (changed) ++g_applied;
-  if (changed && late) MarkEntityFullyChanged(weapon);
+  // A knife swapped to another knife (ChangeSubclass) is sent in full even on its first
+  // tick: the client kept the new model unpainted otherwise (a side-specific karambit on
+  // T showed vanilla while the server had painted it, 2026-10-15).
+  if (changed && (late || swappedKnife)) MarkEntityFullyChanged(weapon);
   if (changed && DebugOn()) {
     Log(RU_LOG_DEBUG, "applied to %s def=%d owner=%llu paint=%d wear=%.2f%s%s", EntityDesignerName(weapon), defindex,
           static_cast<unsigned long long>(steamid64), paintUsed, static_cast<double>(wearUsed),
-          fromOverride ? " (player paint)" : "", late ? " (late)" : "");
+          fromOverride ? " (player paint)" : "", late ? " (late)" : swappedKnife ? " (knife swap)" : "");
   }
   return WeaponResult::kDone;
 }
@@ -331,6 +393,12 @@ struct WeaponState {
   // Painted by another plugin (readyup.skins.v1 paint_weapon): no loadout over it until handed back.
   bool external = false;
   bool externalLegacy = false;  // that paint used the legacy model (reset on hand back)
+  // Held by a bot first. A bot has no SteamID, so its weapons carry no original owner and would
+  // look new to the player who picks one up (a CT got their T-side AK skin on a bot's AK).
+  bool botOwned = false;
+  // A knife swapped to another knife is painted again here: the client rebuilds the model from
+  // the new VData after the first paint and drew it vanilla (a T-side karambit, 2026-10-15).
+  long long repaintAt = 0;
 };
 
 // Cosmetics (agent model, gloves, default_gloves bodygroup) are applied on these ticks after the
@@ -347,6 +415,18 @@ bool g_spawnRequested[65] = {};
 // `.skins reload` (RequestReapply): at this tick (0 = none) the slot's cosmetics run again and
 // the weapons it holds are repainted. A second after the request, so the re-read loadout is in.
 long long g_reapplyAt[65] = {};
+// Repaint what the player holds (no re-give): their first loadout arrived after they spawned.
+std::atomic<bool> g_repaintNow[65] = {};
+// The last round restart (round_prestart / round_start: mp_restartgame, a match going live, a
+// new round). A re-give within kRestartQuietTicks of one is put off: weapons re-given while the
+// restart deletes and recreates them crashed a server (WriteEnterPVS: GetEntServerClass failed,
+// 2026-10-14, a loadout that arrived as the match went live).
+long long g_roundChangeTick = -1000000;
+constexpr long long kRestartQuietTicks = 96;
+// This tick is inside the quiet window (set once per tick in the tick function).
+bool g_restartQuietNow = false;
+// CS2 has a round restart pending this tick (CCSGameRules::m_bGameRestart).
+bool g_restartPendingNow = false;
 // Dev only (skins_debug_as, debug=1): a bot slot decorated with a real player's loadout, so the
 // whole apply path can be exercised without a human client.
 uint64_t g_debugAs[65] = {};
@@ -469,6 +549,28 @@ bool RefreshHeldWeapons(int slot) {
   return true;
 }
 
+// The player in this slot holds a knife now (a live entity in their weapon list). A refresh whose
+// knife removal has not gone through, or a second refresh racing the first, would otherwise give
+// another one: CS2 hands out a second knife rather than replacing it (two knives on one side,
+// NTLAN 2026-10-16).
+bool HoldsKnife(int slot) {
+  auto& o = Off();
+  void* controller = EntityByIndex(slot + 1);
+  if (!controller) return false;
+  void* pawn = EntityFromHandle(Rd<uint32_t>(controller, o.ctrl_playerPawn));
+  if (!pawn) return false;
+  void* ws = Rd<void*>(pawn, o.pawn_weaponServices);
+  if (!ws) return false;
+  const int count = Rd<int32_t>(ws, o.ws_myWeapons);
+  const uint32_t* handles = Rd<const uint32_t*>(ws, o.ws_myWeapons + 8);
+  if (!handles || count <= 0 || count > 64) return false;
+  for (int i = 0; i < count; ++i) {
+    void* weapon = EntityFromHandle(handles[i]);
+    if (weapon && IsKnifeDesigner(EntityDesignerName(weapon))) return true;
+  }
+  return false;
+}
+
 // Before the player loop, so the new weapons are painted in the tick they are created. Waits for
 // the loadout (up to ~2 s after a `.skins reload`) so they get it on first sight.
 void RunPendingRefresh() {
@@ -478,7 +580,12 @@ void RunPendingRefresh() {
     PendingRefresh& pr = g_refresh[slot];
     if (pr.at == 0 || g_tick < pr.at) continue;
     if (!IsLoaded(pr.steamid64) && g_tick < pr.at + 128) continue;
+    const bool hasKnife = HoldsKnife(slot);
     for (const PendingGive& g : pr.gives) {
+      if (hasKnife && IsKnifeDesigner(g.cls.c_str())) {
+        if (DebugOn()) Log(RU_LOG_DEBUG, "refresh: slot %d still holds a knife; not giving another", slot);
+        continue;
+      }
       void* w = g_api->player_give_item(g_api->self, slot, g.cls.c_str());
       if (!w) {
         Log(RU_LOG_WARN, "refresh: could not give %s to slot %d; weapon refresh off until restart", g.cls.c_str(), slot);
@@ -500,6 +607,21 @@ void ProcessPlayer(int slot, void* controller) {
   if (steamid64 == 0 && g_debugAs[slot] != 0 && DebugOn()) steamid64 = g_debugAs[slot];
   if (steamid64 == 0) {  // bots / not yet authenticated
     ps = PlayerState{};
+    // Remember what a bot holds: a player who picks it up gets it as it is (stock).
+    if (void* botPawn = EntityFromHandle(Rd<uint32_t>(controller, o.ctrl_playerPawn))) {
+      if (void* bws = Rd<void*>(botPawn, o.pawn_weaponServices)) {
+        const int n = Rd<int32_t>(bws, o.ws_myWeapons);
+        const uint32_t* hs = Rd<const uint32_t*>(bws, o.ws_myWeapons + 8);
+        if (hs && n > 0 && n <= 64) {
+          for (int i = 0; i < n; ++i) {
+            WeaponState& st = g_weapons[hs[i]];
+            if (st.firstSeen == 0) st.firstSeen = g_tick;
+            st.lastSeen = g_tick;
+            if (!st.done) st.botOwned = true;
+          }
+        }
+      }
+    }
     return;
   }
   if (ps.steamid64 != steamid64) ps = PlayerState{steamid64};
@@ -517,6 +639,15 @@ void ProcessPlayer(int slot, void* controller) {
   const bool alive = Rd<uint8_t>(pawn, o.ent_lifeState) == 0;
   bool repaintHeld = false;
   bool refreshed = false;
+  // Around a round restart no weapon is given or removed: one made or removed while CS2 deletes
+  // and recreates the round's entities crashed servers and clients (2026-10-14, WriteEnterPVS /
+  // CopyExistingEntity). Gun paint is untouched: the round's new weapons are painted on their first
+  // tick as always (holding that too left a vanilla knife, 2026-10-14). Gloves and knife swaps wait
+  // (below).
+  const bool restartQuiet = g_restartQuietNow;
+  if (g_reapplyAt[slot] != 0 && g_tick >= g_reapplyAt[slot] && alive && restartQuiet) {
+    g_reapplyAt[slot] = g_tick + 8;
+  }
   if (g_reapplyAt[slot] != 0 && g_tick >= g_reapplyAt[slot] && alive) {
     g_reapplyAt[slot] = 0;
     g_spawnRequested[slot] = true;
@@ -527,6 +658,17 @@ void ProcessPlayer(int slot, void* controller) {
   if (team != 2 && team != 3) {
     ps.wasAlive = false;
     return;
+  }
+  // The player's first loadout came after their spawn (a server without a match: it is asked
+  // for on connect). Their weapons are given again, as for an equip on the site: a knife swapped
+  // in place on a weapon the client already drew stayed vanilla on the client (CT M9 on a tryout
+  // server, 2026-10-15; a side switch, i.e. new weapons, fixed it). Around a round restart, or
+  // without player_give_item, the held weapons are repainted instead.
+  if (alive && g_repaintNow[slot].exchange(false)) {
+    if (!restartQuiet && !refreshed) refreshed = RefreshHeldWeapons(slot);
+    if (!refreshed) repaintHeld = true;
+    g_spawnRequested[slot] = true;
+    if (DebugOn()) Log(RU_LOG_DEBUG, "first loadout after spawn: %s slot %d", refreshed ? "re-giving" : "repainting", slot);
   }
 
   if (alive && (!ps.wasAlive || ps.pawnHandle != pawnHandle || g_spawnRequested[slot])) {
@@ -539,7 +681,14 @@ void ProcessPlayer(int slot, void* controller) {
   ps.pawnHandle = pawnHandle;
   if (!alive) return;
 
-  if (ps.cosmeticsPass >= 0 && ps.cosmeticsPass < kCosmeticPassCount &&
+  // Gloves and the agent model rebuild things on the client (the glove counter, a full re-send of
+  // the pawn). Done while CS2 restarts the round, the client crashed (CopyExistingEntity, a player
+  // joining with gloves on, 2026-10-14): the passes start over once the restart has settled.
+  // Only while the restart is pending: with no full re-send of the pawn any more (gloves the
+  // WeaponPaints way), waiting the whole quiet window after it only showed stock gloves and knife
+  // for a second after every restart.
+  if (g_restartPendingNow && ps.cosmeticsPass >= 0) ps.spawnTick = g_tick;
+  if (!g_restartPendingNow && ps.cosmeticsPass >= 0 && ps.cosmeticsPass < kCosmeticPassCount &&
       g_tick - ps.spawnTick >= kCosmeticPassTicks[ps.cosmeticsPass]) {
     // Anything first seen on our first active tick may already have been networked.
     const bool late = g_tick > ps.spawnTick + 1 || ps.spawnTick == g_activeSince;
@@ -564,7 +713,20 @@ void ProcessPlayer(int slot, void* controller) {
     WeaponState& st = g_weapons[h];
     if (st.firstSeen == 0) st.firstSeen = g_tick;
     st.lastSeen = g_tick;
+    if (st.done && st.repaintAt != 0 && g_tick >= st.repaintAt) {
+      st.repaintAt = 0;
+      if (void* again = EntityFromHandle(h)) {
+        bool legacy = false;
+        (void)ProcessWeapon(again, steamid64, team, /*late=*/true, &legacy, /*force=*/true);
+        if (legacy) st.legacyPending = true;
+      }
+      continue;
+    }
     if (st.done && !st.legacyPending) continue;
+    if (st.botOwned) {  // picked up from a bot: keep its (stock) look
+      st.done = true;
+      continue;
+    }
     void* weapon = EntityFromHandle(h);
     if (!weapon) continue;
     if (st.done) {
@@ -577,21 +739,37 @@ void ProcessPlayer(int slot, void* controller) {
       }
       continue;
     }
+    // A knife swap (ChangeSubclass) waits while the restart is pending; the restart hands out a new
+    // knife, swapped on its first tick. No re-give: removing and giving weapons is what crashed
+    // clients and servers (a re-give after each round start, 2026-10-14).
+    if (g_restartPendingNow && IsKnifeDesigner(EntityDesignerName(weapon)) && FindKnifeClassname(steamid64, team)) {
+      continue;
+    }
     const bool late = g_tick > st.firstSeen || st.firstSeen == g_activeSince;
     if (ProcessWeapon(weapon, steamid64, team, late, &st.legacyPending) == WeaponResult::kDone ||
         g_tick - st.firstSeen > kRetryTicks) {
       st.done = true;
+      if (g_lastSwappedKnife) st.repaintAt = g_tick + 16;  // about a quarter second
     }
   }
 }
 
 void PruneWeapons() {
   for (auto it = g_weapons.begin(); it != g_weapons.end();) {
-    if (g_tick - it->second.lastSeen > 64 * 60) it = g_weapons.erase(it);
+    if (g_tick - it->second.lastSeen > 64 * 60) {
+      g_knifeSwaps.Forget(it->first);
+      g_weaponStamps.erase(it->first);
+      it = g_weapons.erase(it);
+    }
     else ++it;
   }
 }
 
+}  // namespace
+
+namespace {
+void RunWarmupRegive();
+bool GameRestartPending();
 }  // namespace
 
 void GameFrameTick() {
@@ -614,11 +792,16 @@ void GameFrameTick() {
     g_lastEntitySystemWorld = world;
     g_activeSince = g_tick;
     g_weapons.clear();
+    g_knifeSwaps.Clear();
+    g_weaponStamps.clear();
     for (auto& p : g_players) p = PlayerState{};
     for (auto& r : g_reapplyAt) r = 0;
   }
 
-  RunPendingRefresh();
+  g_restartPendingNow = GameRestartPending();
+  g_restartQuietNow = g_restartPendingNow || g_tick - g_roundChangeTick < kRestartQuietTicks;
+  if (!g_restartQuietNow) RunPendingRefresh();
+  RunWarmupRegive();
   for (int slot = 0; slot < 64; ++slot) {
     void* controller = EntityByIndex(slot + 1);
     if (!controller) {
@@ -710,9 +893,98 @@ void RequestSpawnCosmetics(int slot) {
   if (slot >= 0 && slot < 65) g_spawnRequested[slot] = true;
 }
 
+void NoteRoundChange() { g_roundChangeTick = g_tick; }
+
 void RequestReapply(int slot) {
   if (slot >= 0 && slot < 65) g_reapplyAt[slot] = g_tick + 64;
 }
+
+// ---- warmup re-give (a new loadout from the platform) -----------------------------------------
+std::mutex g_regiveMu;
+std::unordered_set<uint64_t> g_regive;  // players whose loadout changed since the last frame
+
+std::unordered_set<uint64_t> g_firstRepaint;  // guarded by g_regiveMu (filled off the game thread)
+
+void QueueFirstLoadoutRepaint(uint64_t steamid64) {
+  if (steamid64 == 0) return;
+  std::lock_guard<std::mutex> lk(g_regiveMu);
+  g_firstRepaint.insert(steamid64);
+}
+
+void QueueWarmupRegive(uint64_t steamid64) {
+  if (steamid64 == 0) return;
+  std::lock_guard<std::mutex> lk(g_regiveMu);
+  g_regive.insert(steamid64);
+}
+
+namespace {
+int g_offRulesPtr = -2, g_offWarmup = -2, g_offGameRestart = -2;
+uint32_t g_rulesProxy = 0xFFFFFFFFu;
+void* g_rulesPtr = nullptr;
+long long g_rulesScanTick = -100000;
+
+// CS2's own warmup (CCSGameRules::m_bWarmupPeriod): -1 unknown, 0 no, 1 yes.
+int GameWarmup() {
+  if (g_offRulesPtr == -2) {
+    g_offRulesPtr = g_api->schema_offset(g_api->self, "CCSGameRulesProxy", "m_pGameRules");
+    g_offWarmup = g_api->schema_offset(g_api->self, "CCSGameRules", "m_bWarmupPeriod");
+    g_offGameRestart = g_api->schema_offset(g_api->self, "CCSGameRules", "m_bGameRestart");
+  }
+  if (g_offRulesPtr < 0 || g_offWarmup < 0) return -1;
+  void* proxy = g_rulesProxy != 0xFFFFFFFFu ? g_api->entity_from_handle(g_api->self, g_rulesProxy) : nullptr;
+  if (!proxy) {
+    g_rulesProxy = 0xFFFFFFFFu;
+    if (g_tick - g_rulesScanTick < 640) return -1;  // look again in ~10 s
+    g_rulesScanTick = g_tick;
+    for (int i = 65; i < 4096 && !proxy; ++i) {
+      void* e = g_api->entity_by_index(g_api->self, i);
+      if (!e) continue;
+      const char* cn = g_api->entity_classname(g_api->self, e);
+      if (cn && std::strcmp(cn, "cs_gamerules") == 0) {
+        proxy = e;
+        g_rulesProxy = g_api->entity_handle_of(g_api->self, e);
+      }
+    }
+    if (!proxy) return -1;
+  }
+  void* rules = nullptr;
+  std::memcpy(&rules, static_cast<unsigned char*>(proxy) + g_offRulesPtr, sizeof(rules));
+  if (!rules) return -1;
+  g_rulesPtr = rules;
+  return *(static_cast<unsigned char*>(rules) + g_offWarmup) ? 1 : 0;
+}
+
+// CS2 has a restart pending (mp_restartgame, a match going live: CCSGameRules::m_bGameRestart),
+// read through the game rules GameWarmup found.
+bool GameRestartPending() {
+  if (GameWarmup() < 0 || g_offGameRestart < 0 || !g_rulesPtr) return false;
+  return *(static_cast<unsigned char*>(g_rulesPtr) + g_offGameRestart) != 0;
+}
+
+// Game thread: players with a new loadout get their weapons re-given, in warmup only.
+void RunWarmupRegive() {
+  std::unordered_set<uint64_t> due;
+  std::unordered_set<uint64_t> first;
+  {
+    std::lock_guard<std::mutex> lk(g_regiveMu);
+    due.swap(g_regive);
+    first.swap(g_firstRepaint);
+  }
+  for (int slot = 0; slot < 64 && !first.empty(); ++slot) {
+    if (g_players[slot].steamid64 != 0 && first.count(g_players[slot].steamid64)) g_repaintNow[slot] = true;
+  }
+  if (due.empty()) return;
+  // CS2's own warmup, or Ready Up's (a match warmup runs with CS2's warmup ended): swap now.
+  // Live (or unknown): the next spawn brings the new skins.
+  if (GameWarmup() != 1 && !WarmupLike()) return;
+  for (int slot = 0; slot < 64; ++slot) {
+    if (g_players[slot].steamid64 != 0 && due.count(g_players[slot].steamid64)) {
+      RequestReapply(slot);
+      if (DebugOn()) Log(RU_LOG_DEBUG, "warmup: new loadout, re-giving slot %d", slot);
+    }
+  }
+}
+}  // namespace
 
 bool SetDebugAs(int slot, uint64_t steamid64) {
   if (slot < 0 || slot >= 64) return false;

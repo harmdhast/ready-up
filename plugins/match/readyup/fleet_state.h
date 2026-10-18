@@ -40,6 +40,10 @@ class LiveStream {
   // live_rev, stores next (with live_rev) and returns the merge patch (which always includes
   // live_rev). Returns false when nothing changed and !force.
   bool Advance(const Json& next, bool force, Json* patch, long long* rev);
+  // An event that is not about the state (event.chat): bumps live_rev only, so the patch is
+  // just {"live_rev": n} and any state change still goes out with the next Advance(). False
+  // (nothing done) without a state yet; use Advance() then.
+  bool BumpRevOnly(Json* patch, long long* rev);
   long long Rev() const { return rev_; }
   const Json& State() const { return state_; }
   bool HasState() const { return !state_.IsNull(); }

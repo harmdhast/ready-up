@@ -42,6 +42,10 @@ bool TryDispatchChat(uint64_t steamid64, const std::string& playerName, const st
 // e.g. ".r"); *flags gets its RU_CMD_* flags (RU_CMD_HIDE: the caller swallows the line).
 bool ChatCommandOwned(const std::string& token, uint32_t* flags);
 
+// A player's console command: true when a plugin's filter_client_command blocks it (the hook then
+// does not pass it to the game). Game thread.
+bool FilterClientCommand(int slot, uint64_t steamid64, const std::vector<std::string>& argv);
+
 // Thread-safe. `ru <sub> ...` (console, steamid64 0) or `.ru <sub> ...` (chat): if a plugin
 // registered <sub> (register_ru_subcommand), queues the call and returns true.
 bool TryDispatchRu(bool console, uint64_t steamid64, const std::string& playerName, const std::string& text,
