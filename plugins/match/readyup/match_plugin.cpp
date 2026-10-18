@@ -543,7 +543,7 @@ extern "C" {
 READYUP_PLUGIN_EXPORT const ru_plugin_info* readyup_plugin_info(void) {
   static const ru_plugin_info info = {
       sizeof(ru_plugin_info),
-      (1u << 16) | 2u,  // requires 1.2 (log_untagged, ru subcommands, on_frame, ...); 1.3 members via RU_API_HAS
+      (1u << 16) | 16u,  // requires 1.16 (player_respawn sits at the 1.16 offset; a core with another layout refuses it); older members via RU_API_HAS
       "match",
       MATCH_VERSION,
       "Ready Up",
