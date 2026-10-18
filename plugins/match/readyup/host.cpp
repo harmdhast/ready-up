@@ -260,7 +260,9 @@ bool ForceJoinTeamForSlot(int slot, int joinTeam) {
   const ru_api* a = host::Api();
   if (!a || !host::OnGameThread() || slot < 0 || !RU_API_HAS(a, player_change_team) || !a->player_change_team) return false;
   const int team = joinTeam == 3 ? RU_TEAM_CT : joinTeam == 2 ? RU_TEAM_T : RU_TEAM_SPECTATOR;
-  return a->player_change_team(a->self, slot, team) == 1;
+  const bool ok = a->player_change_team(a->self, slot, team) == 1;
+  if (ok) PlayersInvalidate();  // the move landed: the next ListHumans() reads the new team
+  return ok;
 }
 
 bool RespawnAvailable() {

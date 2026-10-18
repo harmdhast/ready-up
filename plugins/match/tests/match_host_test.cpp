@@ -762,6 +762,7 @@ int main(int argc, char** argv) {
   Check(CountLogged("ready: could not move bob to T") == 1, "the refusal is reported once, not every retry");
   Check(!Logged("ready: moved bob"), "a refused move is not logged as moved");
   g_refuseTeamChange = false;
+  g_players.back().team = 1;  // a team event arrives: the retry cap (team_lock.h) starts over
   Check(FramesUntil([] { return Logged("ready: moved bob to T"); }, 3000), "the retry lands");
   (void)FramesUntil([] { return false; }, 2000);
   Check(CountLogged("ready: moved bob to T") == 1, "a landed move is logged once");
@@ -777,6 +778,7 @@ int main(int argc, char** argv) {
   Check(!FramesUntil([&] { return Sent("mp_restartgame 1") || respawned(3); }, 3000),
         "a refused move neither respawns nor restarts the warmup round");
   g_refuseTeamChange = false;
+  g_players.back().team = 1;  // a team event arrives: the retry cap (team_lock.h) starts over
   ClearLog();
   Check(FramesUntil([] { return Logged("ready: moved bob to T"); }, 6000), "bob on no team is moved to his side");
   Check(FramesUntil([&] { return respawned(3); }, 3000), "the forced move respawns bob");
