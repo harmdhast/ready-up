@@ -661,13 +661,13 @@ void ProcessPlayer(int slot, void* controller) {
     return;
   }
   // The player's first loadout came after their spawn (a server without a match: it is asked
-  // for on connect). Their weapons are given again, as for an equip on the site: a knife swapped
-  // in place on a weapon the client already drew stayed vanilla on the client (CT M9 on a tryout
-  // server, 2026-10-15; a side switch, i.e. new weapons, fixed it). Around a round restart, or
-  // without player_give_item, the held weapons are repainted instead.
+  // for on connect). The held weapons are repainted; a knife swapped in place on a weapon the
+  // client already drew stays vanilla on the client until the next restart or respawn gives a new
+  // one (CT M9 on a tryout server, 2026-10-15). No re-give here: removing and giving the weapons
+  // of a player who has just joined crashed the server in tier0 (CS2 1.41.9.2, 2026-10-23); it
+  // only ran once restart detection stopped reading hud_steady's m_bGameRestart.
   if (alive && g_repaintNow[slot].exchange(false)) {
-    if (!restartQuiet && !refreshed) refreshed = RefreshHeldWeapons(slot);
-    if (!refreshed) repaintHeld = true;
+    repaintHeld = !refreshed;
     g_spawnRequested[slot] = true;
     if (DebugOn()) Log(RU_LOG_DEBUG, "first loadout after spawn: %s slot %d", refreshed ? "re-giving" : "repainting", slot);
   }
