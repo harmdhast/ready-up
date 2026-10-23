@@ -808,7 +808,7 @@ change wins until the next `server.config`. An absent field leaves its setting a
 | `hostname_format` | server setting `hostname_format` | match |
 | `scrim_knife` | server setting `knife_enabled_default` | match |
 | `scrim_when_idle` | server setting `scrim_when_idle` (`ru_scrim_when_idle`, default 1): off = an idle server stays idle when players join | match |
-| `series_end_kick_delay.{no_demo,demo_no_upload,demo_upload}` | `ru_series_end_kick_delay_*` | match |
+| `series_end_kick_delay.{no_demo,demo_no_upload,demo_upload}` | `ru_series_end_kick_delay_*`: seconds from the series end to the kick; the server reports `available` only after the unload, at max(kick + 2, demo flush + 9) | match |
 | `demo.path` / `demo.name_format` | `ru_demo_path` / `ru_demo_name_format` | match |
 | `warmup.message_html` / `respawn` / `money` | `ru_warmup_message_html` / `ru_warmup_respawn` / `ru_warmup_startmoney` | match |
 | `offline_pause_minutes` | the offline timer (D12), over `[fleet] offline_pause_minutes` | fleet.so |
