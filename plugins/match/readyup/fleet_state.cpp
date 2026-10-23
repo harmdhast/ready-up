@@ -1163,8 +1163,8 @@ bool BackupParts::Add(const Json& backup, double now, std::string* why) {
   const std::string name = file ? file->AsString() : "";
   const std::string hash = sha ? sha->AsString() : "";
   const long long total = size ? size->AsInt() : 0;
-  const int n = parts ? static_cast<int>(parts->AsInt()) : 1;
-  const int k = part ? static_cast<int>(part->AsInt()) : 1;
+  const long long n = parts ? parts->AsInt() : 1;
+  const long long k = part ? part->AsInt() : 1;
   if (!SafeBackupFileName(name) || hash.size() != 64 || total < 1 || total > 4 * 1024 * 1024 || n < 1 || n > 64 ||
       k < 1 || k > n || !data) {
     *why = "bad backup part";
@@ -1178,6 +1178,11 @@ bool BackupParts::Add(const Json& backup, double now, std::string* why) {
   long long held = 0;
   for (const auto& kv : files_)
     for (const auto& p : kv.second.got) held += static_cast<long long>(p.second.size());
+  // A part sent again replaces its earlier copy: that copy does not count against the cap.
+  if (const auto prev = files_.find(hash); prev != files_.end()) {
+    if (const auto old = prev->second.got.find(static_cast<int>(k)); old != prev->second.got.end())
+      held -= static_cast<long long>(old->second.size());
+  }
   if (held + static_cast<long long>(raw.size()) > kPartsMaxBytes) {
     *why = "too much backup data waiting";
     return false;
@@ -1190,14 +1195,14 @@ bool BackupParts::Add(const Json& backup, double now, std::string* why) {
         if (j->second.last < oldest->second.last) oldest = j;
       files_.erase(oldest);
     }
-    it = files_.emplace(hash, File{name, total, n, {}, now}).first;
+    it = files_.emplace(hash, File{name, total, static_cast<int>(n), {}, now}).first;
   }
   File& f = it->second;
   if (f.parts != n || f.size != total) {
     *why = "parts disagree on the file";
     return false;
   }
-  f.got[k] = std::move(raw);
+  f.got[static_cast<int>(k)] = std::move(raw);
   f.last = now;
   return true;
 }
