@@ -594,8 +594,8 @@ void OnRoundStartLocked(const PendingRound& ev) {
   g_roundNumber += 1;
   MatchStateSetRound(g_roundNumber);
 
-  // Warmup -> live (first real round start).
-  if (GetMode() == ReadyUpMode::MatchWarmup) OnMatchRoundStarted();
+  // Warmup -> live (first real round start), or a force start's live round (win conditions count again).
+  OnMatchRoundStarted();
   WebhookEmitRoundStarted(mapNumber, g_roundNumber, team1Score, team2Score);
   StatsRegisterRoundPlayersLocked();
 }
