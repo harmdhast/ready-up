@@ -72,6 +72,7 @@ const ru_api* g_api = nullptr;
 
 // ---- fleet.so -------------------------------------------------------------------------------
 uint64_t g_fleetInstance = 0;
+bool g_addTimeAdvertised = false;  // cmd.add_time.v1 sent to the current fleet instance
 std::vector<uint64_t> g_handlerIds;
 double g_lastIdlePublish = -1e9;
 fs::AvailabilityInfo g_lastPublishedAvail;  // empty availability = nothing published yet
@@ -2008,11 +2009,20 @@ void EnsureHandlers() {
   if (!f) {
     g_fleetInstance = 0;
     g_handlerIds.clear();
+    g_addTimeAdvertised = false;
     return;
   }
   const uint64_t inst = f->instance_id();
-  if (inst == g_fleetInstance) return;
+  if (inst == g_fleetInstance) {
+    // The schema may not have been verified on the frame the instance appeared: look again.
+    if (!g_addTimeAdvertised && RoundTimeOffsets()) {
+      f->add_capability("cmd.add_time.v1");
+      g_addTimeAdvertised = true;
+    }
+    return;
+  }
   g_fleetInstance = inst;
+  g_addTimeAdvertised = false;
   g_handlerIds.clear();  // a new fleet.so image has no registrations
   for (const char* type : {"match.assign", "match.update", "match.unassign", "cmd", "local.offline_timeout",
                            "local.connection", "admins.set", "server.config", "server.drain",
@@ -2024,7 +2034,10 @@ void EnsureHandlers() {
   f->add_capability("match.backup.v1");
   f->add_capability("match.resume.v1");
   f->add_capability("cmd.reset.v1");
-  if (RoundTimeOffsets()) f->add_capability("cmd.add_time.v1");  // only where it can work
+  if (RoundTimeOffsets()) {  // only where it can work; Tick looks again until it does
+    f->add_capability("cmd.add_time.v1");
+    g_addTimeAdvertised = true;
+  }
   f->add_capability("maps.workshop.v1");
   f->add_capability("mode.wingman.v1");
   f->add_capability("mode.simulation.v1");
