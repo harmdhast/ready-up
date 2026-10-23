@@ -59,6 +59,8 @@ Based on upstream `master` 8f3ecf5 (v0.1.0-beta.77 is 0b7ce93). Conflicts are be
 | fix/schema-offset-retry | A schema offset that was missing is looked up again on later ticks (warmup score, warmup ammo, hud steady), logged once; branched from `custom` | merged | none | |
 | fix/backup-parts-cap | A backup part sent again does not count twice against the 16 MiB cap; `part` and `parts` outside int range are refused instead of wrapping; branched from `custom` | merged | none | |
 | fix/cs2-update-check-flag | A throwing CS2 update check no longer leaves the checker marked as running (upstream code) | merged | none | |
+| fix/ready-panel-text-size | The not ready lines of the ready panel (YOU ARE NOT READY, YOUR TEAM IS NOT READY, WAITING FOR YOUR TEAM) use `fontSize-l` like the ready ones instead of `fontSize-xl` (personal design: upstream #236 made them big) | merged | none | |
+| fix/skins-restart-pending | Skins read a pending round restart from `m_flRestartRoundTime` > `m_fRoundStartTime` instead of `m_bGameRestart`, which fix/hud-blink's hud_steady sets every tick: knife swaps and glove passes were held until the knife had been networked, and the client kept the stock knife; branched from `custom` | merged | none | |
 
 ## Upstream syncs
 
