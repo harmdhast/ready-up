@@ -1,3 +1,4 @@
+#include "game_restart.h"
 #include "knife_swap.h"
 #include "skins.h"
 
@@ -425,7 +426,7 @@ long long g_roundChangeTick = -1000000;
 constexpr long long kRestartQuietTicks = 96;
 // This tick is inside the quiet window (set once per tick in the tick function).
 bool g_restartQuietNow = false;
-// CS2 has a round restart pending this tick (CCSGameRules::m_bGameRestart).
+// CS2 has a round restart pending this tick (GameRestartPending).
 bool g_restartPendingNow = false;
 // Dev only (skins_debug_as, debug=1): a bot slot decorated with a real player's loadout, so the
 // whole apply path can be exercised without a human client.
@@ -918,7 +919,7 @@ void QueueWarmupRegive(uint64_t steamid64) {
 }
 
 namespace {
-int g_offRulesPtr = -2, g_offWarmup = -2, g_offGameRestart = -2;
+int g_offRulesPtr = -2, g_offWarmup = -2, g_offRestartTime = -2, g_offRoundStart = -2;
 uint32_t g_rulesProxy = 0xFFFFFFFFu;
 void* g_rulesPtr = nullptr;
 long long g_rulesScanTick = -100000;
@@ -928,7 +929,8 @@ int GameWarmup() {
   if (g_offRulesPtr == -2) {
     g_offRulesPtr = g_api->schema_offset(g_api->self, "CCSGameRulesProxy", "m_pGameRules");
     g_offWarmup = g_api->schema_offset(g_api->self, "CCSGameRules", "m_bWarmupPeriod");
-    g_offGameRestart = g_api->schema_offset(g_api->self, "CCSGameRules", "m_bGameRestart");
+    g_offRestartTime = g_api->schema_offset(g_api->self, "CCSGameRules", "m_flRestartRoundTime");
+    g_offRoundStart = g_api->schema_offset(g_api->self, "CCSGameRules", "m_fRoundStartTime");
   }
   if (g_offRulesPtr < 0 || g_offWarmup < 0) return -1;
   void* proxy = g_rulesProxy != 0xFFFFFFFFu ? g_api->entity_from_handle(g_api->self, g_rulesProxy) : nullptr;
@@ -954,11 +956,14 @@ int GameWarmup() {
   return *(static_cast<unsigned char*>(rules) + g_offWarmup) ? 1 : 0;
 }
 
-// CS2 has a restart pending (mp_restartgame, a match going live: CCSGameRules::m_bGameRestart),
-// read through the game rules GameWarmup found.
+// CS2 has a restart pending (mp_restartgame, a match going live), read from the round times of the
+// game rules GameWarmup found (game_restart.h: not m_bGameRestart, which hud_steady rewrites).
 bool GameRestartPending() {
-  if (GameWarmup() < 0 || g_offGameRestart < 0 || !g_rulesPtr) return false;
-  return *(static_cast<unsigned char*>(g_rulesPtr) + g_offGameRestart) != 0;
+  if (GameWarmup() < 0 || g_offRestartTime < 0 || g_offRoundStart < 0 || !g_rulesPtr) return false;
+  float restartTime = 0.0f, roundStart = 0.0f;
+  std::memcpy(&restartTime, static_cast<unsigned char*>(g_rulesPtr) + g_offRestartTime, sizeof(restartTime));
+  std::memcpy(&roundStart, static_cast<unsigned char*>(g_rulesPtr) + g_offRoundStart, sizeof(roundStart));
+  return RestartPending(restartTime, roundStart);
 }
 
 // Game thread: players with a new loadout get their weapons re-given, in warmup only.
