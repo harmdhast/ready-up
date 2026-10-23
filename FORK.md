@@ -71,3 +71,6 @@ Based on upstream `master` 8f3ecf5 (v0.1.0-beta.77 is 0b7ce93). Conflicts are be
 
 - spike/live-logs-perf: spike.
 - test/*: retired integration branches.
+| fix/golive-win-conditions | A force start releases the go-live win-condition hold once the live round starts (a round start within 900 ms of the gate command is the restart itself): rounds never ended after `.forcestart` and buying was allowed everywhere | merged | none | |
+| fix/hud-blink (halftime) | hud_steady only rewrites `m_bGameRestart` in ready-panel phases (match warmup, knife, scrim warmup): outside them the client replayed the halftime music in a loop | merged | none | |
+| feat/series-end-kick-early | Players are kicked `series_end_kick_delay_*` seconds after the series ends, even while a GOTV demo is flushing; the match unloads at max(kick + 2, restart_delay - 1), so the demo is never cut short (personal design: upstream #234 kicks after the flush) | merged | none | |
