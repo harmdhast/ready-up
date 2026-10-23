@@ -16,9 +16,10 @@
 //       map starts in match warmup.
 //   3b. Series over (no maps left, or a team clinched when clinch_series is on): a
 //       SeriesEnd event. For matches, every human is kicked after
-//       (restart_delay - 1) + ru_series_end_kick_delay_{no_demo|demo_no_upload|demo_upload}
-//       (30 s each by default, so players can read the scoreboard), and 2 s later the match is unloaded (ServerReset event, mode
-//       postgame -> idle). Scrims are not kicked; they stay in postgame until
+//       ru_series_end_kick_delay_{no_demo|demo_no_upload|demo_upload} (30 s each by default, so
+//       players can read the scoreboard), whatever the GOTV flush. The match is unloaded
+//       (ServerReset event, mode postgame -> idle) at max(kick + 2 s, restart_delay - 1), so the
+//       demo is never cut short. Scrims are not kicked; they stay in postgame until
 //       restart_delay - 1 (9 s without a demo), then unload.
 //
 // Internal events are delivered to listeners (AddMatchFlowListener) on the game thread.
@@ -46,7 +47,8 @@ namespace readyup {
 struct MapEndPlan {
   int restartDelay = 10;  // seconds until the next map / the series-end window starts
   int tvFlushDelay = 0;   // seconds until tv_stoprecord (0 = no demo)
-  int kickDelay = 0;      // series end: seconds until players are kicked
+  int kickDelay = 0;      // series end: seconds until players are kicked (the configured delay, not the GOTV flush)
+  int resetDelay = 9;     // series end: seconds until the match is unloaded (after the kick and the GOTV flush)
 };
 
 MapEndPlan ComputeMapEndPlan(bool demoRecording, bool hasUploadUrl, int tvDelay, int kickExtraNoDemo,
@@ -76,7 +78,7 @@ struct MatchFlowEvent {
   int team2SeriesScore = 0;
   bool seriesOver = false;     // MapResult: this map ended the series
   std::string nextMap;         // MapResult when the series continues
-  int secondsUntilReset = 0;   // SeriesEnd: until players are kicked / the match is unloaded
+  int secondsUntilReset = 0;   // SeriesEnd: until players are kicked (scrims: unloaded)
   bool demoRecorded = false;
   bool demoUploadConfigured = false;
   stats::MapStats stats;       // MapResult

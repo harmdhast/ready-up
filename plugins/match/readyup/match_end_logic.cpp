@@ -11,6 +11,7 @@ namespace {
 constexpr int kFlushMargin = 15;      // GOTV needs tv_delay + this to write the last ticks
 constexpr int kTvDelayMargin = 10;    // extra restart delay when tv_delay > 0
 constexpr int kNoDemoRestartDelay = 10;
+constexpr int kKickToResetGap = 2;    // the unload comes this long after the kick
 }  // namespace
 
 MapEndPlan ComputeMapEndPlan(bool demoRecording, bool hasUploadUrl, int tvDelay, int kickExtraNoDemo,
@@ -19,12 +20,14 @@ MapEndPlan ComputeMapEndPlan(bool demoRecording, bool hasUploadUrl, int tvDelay,
   tvDelay = std::max(0, tvDelay);
   if (!demoRecording) {
     p.restartDelay = kNoDemoRestartDelay;
-    p.kickDelay = (p.restartDelay - 1) + std::max(0, kickExtraNoDemo);
+    p.kickDelay = std::max(0, kickExtraNoDemo);
+    p.resetDelay = std::max(p.kickDelay + kKickToResetGap, p.restartDelay - 1);
     return p;
   }
   p.tvFlushDelay = tvDelay + kFlushMargin;
   p.restartDelay = tvDelay > 0 ? p.tvFlushDelay + kTvDelayMargin : p.tvFlushDelay;
-  p.kickDelay = (p.restartDelay - 1) + std::max(0, hasUploadUrl ? kickExtraDemoUpload : kickExtraDemoNoUpload);
+  p.kickDelay = std::max(0, hasUploadUrl ? kickExtraDemoUpload : kickExtraDemoNoUpload);
+  p.resetDelay = std::max(p.kickDelay + kKickToResetGap, p.restartDelay - 1);
   return p;
 }
 

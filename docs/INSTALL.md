@@ -166,7 +166,8 @@ match plugin loads after a server restart:
   `ru_demo_upload_header_key` / `ru_demo_upload_header_value` (the platform's token header; the
   `get5_demo_upload_header_key` / `_value` aliases are saved under these names)
 - `ru_series_end_kick_delay_no_demo`, `ru_series_end_kick_delay_demo_no_upload`,
-  `ru_series_end_kick_delay_demo_upload`
+  `ru_series_end_kick_delay_demo_upload` (seconds after the series ends until players are kicked,
+  also while a GOTV demo is still flushing; the match unloads after the kick and the demo flush)
 
 Not saved: `ru_dev_bots_scrim` (debug only; `ru_dev_bots_scrim cfg` goes back to readyup.cfg) and
 the read-only `ru_demo_status` / `ru_match_stats [matchid]` (one console line `match_stats {...}`: the
