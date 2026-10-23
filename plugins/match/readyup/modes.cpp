@@ -134,6 +134,9 @@ struct State {
   // Best-effort warmup rules + transition into live.
   bool warmupRulesApplied = false;
   bool startTriggered = false;
+  // A force start is live at once, so the go-live round start below never ends its win-condition
+  // hold: the first live round start after its restart does.
+  bool forceStartWinHold = false;
   std::chrono::steady_clock::time_point lastGateCmd{};
 
   // Boot-time recovery gate (pause + wait for ready) for mid-match restart.
@@ -1747,6 +1750,7 @@ void OnMatchLoaded() {
   st.recoveryGate = false;
   st.fullRosterGate = false;
   st.lastForceJoin.clear();
+  st.forceStartWinHold = false;
   st.matchLoadedChatSent = false;
   st.lastNotReadyChat = {};
 
@@ -1758,6 +1762,16 @@ void OnMatchLoaded() {
 void OnMatchRoundStarted() {
   auto& st = St();
   std::lock_guard<std::mutex> lk(st.mu);
+  if (st.forceStartWinHold && st.mode == ReadyUpMode::MatchLive) {
+    if (st.lastGateCmd.time_since_epoch().count() != 0 &&
+        (std::chrono::steady_clock::now() - st.lastGateCmd) < std::chrono::milliseconds(900)) {
+      DebugLine("modes: ignoring Round_Start right after the force-start restart");
+      return;
+    }
+    st.forceStartWinHold = false;
+    if (const auto ctxWin = WebhookGetMatchContext()) (void)EnqueueServerCommand(WinConditionsAtLiveCommand(*ctxWin).c_str());
+    return;
+  }
   if (st.mode != ReadyUpMode::MatchWarmup) return;
   // A round started after the match load / next map's changelevel: the warmup's map is up, also
   // when it is the map the server was already on.
@@ -1837,6 +1851,8 @@ bool ForceStartMatch(bool force) {
   st.lastUi.clear();
   st.warmupRulesApplied = false;
   st.startTriggered = false;
+  st.forceStartWinHold = true;
+  st.lastGateCmd = std::chrono::steady_clock::now();
   readyup::persisted_match_state::PersistLiveFlag(true);
   match_recovery::NoteProgress();
   WebhookSetHeartbeatStatus("live");
@@ -1881,6 +1897,7 @@ bool RestartMatch() {
 
   // Return to warmup gating and restart.
   st.mode = ReadyUpMode::MatchWarmup;
+  st.forceStartWinHold = false;
   st.idleCfgExecuted = false;
   st.ready.clear();
   st.lastUi.clear();
