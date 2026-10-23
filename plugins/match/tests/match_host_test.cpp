@@ -721,6 +721,24 @@ int main(int argc, char** argv) {
   g_team.score = 0;
   g_teamsUp = false;
   ClearCmds();
+  // A level load: its MAP_START already reset the map state, so the `Started map` line of that
+  // same load (another tick) does not reset it, nor send the warmup rules, again.
+  {
+    rp::LifecycleEvent lv;
+    lv.type = RU_EVENT_MAP_START;
+    lv.map = "de_other";
+    rp::PostEvent(lv);
+    FramesUntil([] { return false; }, 500);
+    lv.map = "de_test";
+    rp::PostEvent(lv);
+    Check(FramesUntil([] { return Sent("mp_roundtime 7"); }, 12000), "level load: warmup rules applied again");
+    FramesUntil([] { return false; }, 1000);
+    ClearCmds();
+    rp::PostLogLine("L 01/01/2026 - 00:00:03: Started map \"de_test\" (CRC \"1\")\n");
+    FramesUntil([] { return false; }, 3000);
+    Check(CountPrefix("mp_roundtime ") == 0, "level load, then its `Started map`: the warmup rules do not go out twice");
+    ClearCmds();
+  }
   g_teamsUp = true;
   Check(!FramesUntil([] { return Sent("mp_restartgame 1") || Sent("mp_roundtime 7"); }, 300),
         "match warmup, no score: no restart, warmup rules not sent again");

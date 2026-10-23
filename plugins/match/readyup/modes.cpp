@@ -121,6 +121,9 @@ struct State {
   std::string lastSeenMap;
   // A map load was logged (ModesOnMapLoaded): also a reload of lastSeenMap.
   bool mapLoaded = false;
+  // ModesOnMapStart already reset the map state: the "Started map" line of the same load must not
+  // reset it again (the warmup rules would go out twice).
+  bool mapStartSeen = false;
 
   // The map of this warmup is loaded: false from a match load or next-map warmup until its map
   // change or its first round start shows up (warmup_score.h).
@@ -1436,6 +1439,7 @@ void ModesOnMapStart() {
   // check in Tick() never fired and the warmup ran on competitive defaults (no respawn, 15 s freeze
   // time; 2026-10-14). Forgetting the map makes Tick() treat it as new.
   st.lastSeenMap.clear();
+  st.mapStartSeen = true;
 }
 
 // Restarts the match warmup round so everyone spawns. Debounced: a few joins (and a team-lock
@@ -1496,9 +1500,19 @@ void ModesOnHumanJoinedTeam(int slot, uint64_t steamid, int team) {
   });
 }
 
+void ModesOnMapLoading() {
+  auto& st = St();
+  std::lock_guard<std::mutex> lk(st.mu);
+  st.mapStartSeen = false;
+}
+
 void ModesOnMapLoaded() {
   auto& st = St();
   std::lock_guard<std::mutex> lk(st.mu);
+  if (st.mapStartSeen) {
+    st.mapStartSeen = false;  // the level load's MAP_START covered this one
+    return;
+  }
   st.mapLoaded = true;
 }
 

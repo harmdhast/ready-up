@@ -103,8 +103,12 @@ void ModesOnEngineGameOver(int ctScore, int tScore);
 
 // The engine logged `Started map` for the map it is already on (match_log.cpp; a new map name goes
 // through the map change): CS2 ran the gamemode cfg again, so the next Tick re-applies the cfg
-// baselines and the warmup rules over it.
+// baselines and the warmup rules over it. Ignored when the level's RU_EVENT_MAP_START
+// (ModesOnMapStart) already did that for this load.
 void ModesOnMapLoaded();
+
+// The engine logged `Loading map`: a new load begins (match_log.cpp).
+void ModesOnMapLoading();
 
 // A human joined CT or T (engine player_team, or a team-lock move). In match warmup the round is one
 // long round, so a player who joins mid-round stays dead until it ends: 0.5 s later the joiner is

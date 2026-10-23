@@ -169,6 +169,7 @@ void LifecycleLocked(const std::string& line) {
     // "Loading map" and "Started map" of one load are one change, whichever form they use. A
     // "Started map" of the map already on is a reload of it (the gamemode cfg ran again).
     const bool started = line.find("Started map \"") != std::string::npos;
+    if (!started) ModesOnMapLoading();
     if (ExtractBetween(line, "map \"", "\"", map) && !map.empty()) {
       if (mapnames::LoadedBaseName(map) != g_currentMap) {
         MapChanged(map);
