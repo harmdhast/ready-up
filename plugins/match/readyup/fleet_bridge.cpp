@@ -1977,12 +1977,15 @@ void CheckCs2Update(double now, bool active) {
   if (cur <= 0) return;
   g_cs2Running = true;
   if (!workers::Spawn("cs2-update-check", [cur]() {
-        const HttpResponse r = HttpGet(cs2update::CheckUrl(cur), std::nullopt);
-        if (r.status == 200) {
-          const cs2update::Answer ans = cs2update::ParseAnswer(r.body);
-          std::lock_guard<std::mutex> lk(g_cs2Mu);
-          g_cs2Answer = ans;
-          g_cs2AnswerNew = true;
+        try {
+          const HttpResponse r = HttpGet(cs2update::CheckUrl(cur), std::nullopt);
+          if (r.status == 200) {
+            const cs2update::Answer ans = cs2update::ParseAnswer(r.body);
+            std::lock_guard<std::mutex> lk(g_cs2Mu);
+            g_cs2Answer = ans;
+            g_cs2AnswerNew = true;
+          }
+        } catch (const std::exception&) {
         }
         g_cs2Running = false;
       })) {
