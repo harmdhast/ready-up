@@ -4,6 +4,7 @@
 #include "readyup/config.h"
 #include "readyup/host.h"
 #include "readyup/logging.h"
+#include "readyup/modes.h"
 #include "readyup/plugin_api.h"
 
 #include <cstdint>
@@ -55,6 +56,12 @@ void* Proxy(const ru_api* a) {
   return nullptr;
 }
 
+// Phases that redraw the ready panel every second. Elsewhere CS2 keeps m_bGameRestart: rewriting it
+// every tick through a halftime replayed the halftime music on the clients in a loop (2026-10-24).
+bool ReadyPanelPhase(ReadyUpMode mode) {
+  return mode == ReadyUpMode::MatchWarmup || mode == ReadyUpMode::MatchKnife || mode == ReadyUpMode::ScrimWarmup;
+}
+
 }  // namespace
 
 void HudSteadyOnMapStart() {
@@ -64,7 +71,7 @@ void HudSteadyOnMapStart() {
 }
 
 void HudSteadyTick() {
-  if (!Cfg().hud_steady) return;
+  if (!Cfg().hud_steady || !ReadyPanelPhase(GetMode())) return;
   const ru_api* a = host::Api();
   if (!a || a->entity_system_status(a->self) != RU_ENTSYS_OK || !Resolve(a)) return;
   void* proxy = Proxy(a);
