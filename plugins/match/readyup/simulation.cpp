@@ -8,6 +8,7 @@
 #include "readyup/match_state.h"
 #include "readyup/modes.h"
 #include "readyup/players.h"
+#include "readyup/roster_names.h"
 #include "readyup/simulation_rules.h"
 #include "readyup/webhook.h"
 
@@ -400,6 +401,7 @@ void SimulationTick(double now) {
             Print("simulation: bot %s<%d> plays %s (%llu, team%d)\n", botName.c_str(), kv.first,
                   id.steamid64 ? id.name.c_str() : "an anonymous player", static_cast<unsigned long long>(id.steamid64),
                   id.team);
+            if (id.steamid64 != 0) RosterNamesNameBot(botName, id.name);
             if (id.steamid64 != 0 && s.announced.insert(id.steamid64).second) {
               connects.push_back(WebhookPlayer{id.steamid64, id.name, TeamTag(id.team)});
             }

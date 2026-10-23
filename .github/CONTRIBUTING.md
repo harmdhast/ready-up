@@ -15,7 +15,9 @@ Ready Up is part of [Auto Tournament](https://github.com/Auto-Tournament). Docs 
 1. Fork the repo and create a branch.
 2. Build with `./build.sh` and run `build/readyup_sigcheck <path/to/libserver.so> gamedata/engine-surface.json`.
 3. Keep engine-facing changes in `gamedata/engine-surface.json`, each with an identity anchor. See [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md).
-4. Open a pull request against `master` and describe how you tested it.
+4. Open a pull request against `master`.
+
+The [contribution rules](https://github.com/Auto-Tournament/.github/blob/main/CONTRIBUTING.md) apply to every PR: keep it small, say what you ran and what you saw, say if an AI tool wrote any of it (and read every line), and leave the UI and docs to the maintainer.
 
 Releases (stable and beta) are cut by maintainers with `./release.sh`; see [docs/RELEASING.md](../docs/RELEASING.md).
 

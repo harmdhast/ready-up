@@ -90,6 +90,7 @@ set(MATCH_SOURCES
   # Shared engine-free code (libs/readyup).
   ${CMAKE_SOURCE_DIR}/libs/readyup/broadcast_profile.cpp
   ${CMAKE_SOURCE_DIR}/libs/readyup/http_client.cpp
+  readyup/license_checkin.cpp
   ${CMAKE_SOURCE_DIR}/libs/readyup/json_store.cpp
   ${CMAKE_SOURCE_DIR}/libs/readyup/minijson.cpp
   ${CMAKE_SOURCE_DIR}/libs/readyup/status_snapshot.cpp

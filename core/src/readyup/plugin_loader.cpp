@@ -39,6 +39,7 @@
 #include <shared_mutex>
 #include <string>
 #include <thread>
+#include <cstdio>
 #include <vector>
 
 // The opaque handle from core/include/readyup/plugin_api.h. Never freed: a plugin thread that outlives
@@ -907,6 +908,8 @@ void CloseImage(Instance* inst) {
   }
 }
 
+void UnloadPluginsAtQuit();
+
 // Game thread, g_depth == 0.
 bool UnloadNow(const std::string& name, std::string* err) {
   Instance* inst = nullptr;
@@ -1103,6 +1106,7 @@ bool LoadNow(const std::string& name, std::string* err, bool checkNeeds = true) 
     CloseImage(inst);
     return fail("readyup_plugin_load returned " + std::to_string(rc));
   }
+  std::atexit(&UnloadPluginsAtQuit);  // after this plugin's own exit handlers: runs before them
   Print("plugin: loaded %s %s (api %u.%u) from %s\n", name.c_str(), inst->version.c_str(), RU_API_VERSION_MAJOR(want),
         RU_API_VERSION_MINOR(want), path.c_str());
   return true;
@@ -1326,6 +1330,22 @@ bool QueueCommandLocked(RegKind kind, const std::string& token, QueuedCmd c) {
     return true;
   }
   return false;
+}
+
+// At quit, exit() runs the plugins' static destructors while their threads (fleet, workers, the
+// license check-in) still run: a joinable std::thread aborted the process, or a thread used freed
+// state and it crashed with SIGSEGV, on every stop. Exit handlers run in reverse order of
+// registration, so this one, registered after each plugin loads (LoadNow), runs before that
+// plugin's destructors and unloads every plugin first, which joins those threads.
+void UnloadPluginsAtQuit() {
+  std::vector<std::string> names;
+  {
+    std::lock_guard<std::mutex> lk(g_mu);
+    for (const auto& kv : g_loaded) names.push_back(kv.first);
+  }
+  if (names.empty()) return;
+  std::fprintf(stderr, "[ReadyUp] quit: unloading %zu plugin(s)\n", names.size());
+  for (auto it = names.rbegin(); it != names.rend(); ++it) (void)UnloadNow(*it, nullptr);
 }
 
 }  // namespace

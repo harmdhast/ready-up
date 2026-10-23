@@ -78,7 +78,7 @@ bool ForceJoinTeamForSlot(int slot, int joinTeam);
 // (CCSPlayerController::ChangeTeam from the practice gamedata). False when the core or this CS2
 // build does not have it. Game thread.
 bool MoveSlotToSpectators(int slot);
-// Whether ru_api 1.16 player_respawn works on this core and CS2 build. Game thread.
+// Whether ru_api 1.17 player_respawn works on this core and CS2 build. Game thread.
 bool RespawnAvailable();
 // The dead player in `slot` (on T / CT) respawns alone through player_respawn: 1 respawned,
 // 2 already alive, 0 refused or unavailable. Game thread.

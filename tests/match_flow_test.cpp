@@ -314,6 +314,9 @@ static void TestDemoNaming() {
   v.roundNumber = 24;
   CHECK_STR(demo::ExpandTokens("{FILENAME}:{ROUND_NUMBER}", v), std::string("x.dem:24"));
   CHECK_STR(demo::FormatDemoFileName("../{MAP}", v), std::string("_de_dust2"));
+  v.team1 = "Team!";
+  v.team2 = "Blå#1";
+  CHECK_STR(demo::FormatDemoFileName("{TEAM1}_vs_{TEAM2}", v), std::string("Team__vs_Bl___1"));
 
   std::vector<demo::DemoCandidate> files = {
       {"/csgo/ReadyUp/old_42_de_dust2.dem", 100},

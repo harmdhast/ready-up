@@ -124,7 +124,7 @@ static std::optional<uintptr_t> MovLoadRipTarget(const Image& img, uintptr_t at)
 }
 
 // Addresses of RIP-relative LEAs (REX.W 8D, mod=00 rm=101) in executable regions whose target is `target`.
-static std::vector<uintptr_t> LeaSitesOf(const Image& img, uintptr_t target) {
+std::vector<uintptr_t> LeaSitesOf(const Image& img, uintptr_t target) {
   std::vector<uintptr_t> out;
   for (const auto& r : img.regions) {
     if (!r.exec || r.size < 7) continue;

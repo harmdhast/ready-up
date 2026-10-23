@@ -1,7 +1,7 @@
 {
   "_meta": {
-    "game_version": "1.41.9.0",
-    "steam_buildid": 25815307,
+    "game_version": "1.41.9.2",
+    "steam_buildid": 26144732,
     "binary": "game/csgo/bin/linuxsteamrt64/libserver.so",
     "notes": [
       "Repo-owned engine surface for Ready Up. This file (or the copy embedded in the shim at build time) is the only source of signatures; the CounterStrikeSharp CDN gamedata is no longer used.",
@@ -128,8 +128,8 @@
         },
         {
           "type": "caller_string",
-          "string": "Method Entity.Move invoked with bad newValues value.\n",
-          "window": 128
+          "string": "Method Entity.Move invoked with bad value for argument 0 (newValues). Got %s.",
+          "window": 256
         }
       ]
     },

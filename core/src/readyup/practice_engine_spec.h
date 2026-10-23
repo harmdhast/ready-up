@@ -1,7 +1,7 @@
 #pragma once
 
 // Pure rules of ru_api 1.13 (player_change_team, player_teleport, entity_create, entity_spawn,
-// engine_feature_available) and 1.16 (player_respawn), kept free of engine code so they are unit tested
+// engine_feature_available) and 1.17 (player_respawn), kept free of engine code so they are unit tested
 // (tests/practice_engine_spec_test.cpp): which engine-surface entries each feature needs and which
 // requests are refused before any engine call.
 

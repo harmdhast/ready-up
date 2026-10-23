@@ -1,7 +1,7 @@
 #pragma once
 
 // ru_api 1.13: player_change_team, player_teleport, entity_create, entity_spawn and
-// engine_feature_available; 1.16: player_respawn.
+// engine_feature_available; 1.17: player_respawn.
 //
 // Like grenade_spawn (grenades.h), the engine functions come from the practice gamedata fragment
 // (gamedata/engine-surface.practice.json), which ships only with the practice plugin:

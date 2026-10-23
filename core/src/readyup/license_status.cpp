@@ -199,6 +199,18 @@ std::string StoppedMessage() {
   return StoppedText(StandingLocked(s));
 }
 
+std::string PaidKey() {
+  State& s = S();
+  std::string key;
+  {
+    std::lock_guard<std::mutex> lk(s.mu);
+    key = FindKeyLocked(s).key;
+  }
+  if (key.empty()) return {};
+  const Result r = Check(key);
+  return r.valid() && r.license.kind != "free" ? key : std::string();
+}
+
 void LogAtLoad() {
   State& s = S();
   std::lock_guard<std::mutex> lk(s.mu);

@@ -2,36 +2,30 @@
   "schema_version": 1,
   "plugin": "movement",
   "api": [
-    "center_html_release",
     "center_html_to_slot_prio",
     "chat_all",
     "chat_to_slot",
-    "config_get",
-    "current_map",
-    "data_dir",
     "entity_by_index",
     "entity_classname",
     "entity_from_handle",
-    "for_each_player",
-    "get_interface",
-    "get_player",
     "on_tick",
     "player_change_team",
     "player_teleport",
     "register_chat_command",
-    "schema_offset",
-    "server_command",
-    "subscribe"
+    "schema_offset"
   ],
   "surface": [
-    "CCommand",
+    "CSchemaSystem",
+    "CSchemaSystemTypeScope",
+    "CServerSideClient_GameEventLegacyProxy",
     "ClientPrint",
-    "ISource2GameClients::ClientCommand",
+    "Host_Say",
     "ISource2Server::GameFrame",
-    "Host_Say"
+    "LegacyGameEventListener",
+    "UTIL_ClientPrintAll",
+    "UTIL_Remove"
   ],
-  "schema": [],
-  "schema_optional": [
+  "schema": [
     "CBaseEntity.m_CBodyComponent",
     "CBaseEntity.m_MoveType",
     "CBaseEntity.m_lifeState",
@@ -46,5 +40,6 @@
     "CEntityInstance.m_pEntity",
     "CGameSceneNode.m_vecAbsOrigin"
   ],
+  "schema_optional": [],
   "events": []
 }

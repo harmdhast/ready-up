@@ -108,7 +108,8 @@ class CompatReportTest(unittest.TestCase):
         self.assertEqual(doc["overall"], "warn")
         self.assertIsNotNone(doc["run"]["finished_at"])
         ids = [c["id"] for c in doc["components"]]
-        self.assertEqual(ids, ["core", "skins", "match", "practice", "essentials", "midas", "whitelist", "deathmatch", "fleet"])
+        self.assertEqual(ids, ["core", "skins", "match", "practice", "essentials", "midas", "whitelist", "deathmatch",
+                               "movement", "mapvote", "community", "tv", "fleet"])
         core, skins = self.comp(doc, "core"), self.comp(doc, "skins")
         self.assertEqual((core["name"], core["status"]), ("Core", "pass"))
         self.assertEqual(self.check(core, "signature"), {"kind": "signature", "status": "pass", "passed": 2,
@@ -212,7 +213,7 @@ class CompatReportTest(unittest.TestCase):
             assert_contract(self, doc)
             self.assertEqual((doc["run"]["state"], doc["overall"]), (state, overall))
             self.assertEqual(doc["cs2"], {"buildid": "25537371", "patch": ""})
-            self.assertEqual(len(doc["components"]), 9)
+            self.assertEqual(len(doc["components"]), 13)
             self.assertTrue(all(c["status"] == comp_status and c["checks"] == [] for c in doc["components"]))
             if state == "no_verdict":
                 self.assertRegex(doc["run"]["finished_at"], ISO)
@@ -301,7 +302,7 @@ class CompatReportTest(unittest.TestCase):
             self.assertFalse((fns | slots) & set(need.get("surface") or []), pid)
 
     def test_respawn_is_core_and_never_a_hard_need(self):
-        """ru_api 1.16 player_respawn: SetPawn and the Respawn slot are the core's, optional, named by
+        """ru_api 1.17 player_respawn: SetPawn and the Respawn slot are the core's, optional, named by
         the core's feature table, and no plugin lists them in "surface"."""
         files = cr.surface_files(str(ROOT / "gamedata"))
         owner, _ = cr.ownership(files)
@@ -474,7 +475,8 @@ class CompatReportTest(unittest.TestCase):
     def test_dynamic_live_all_green(self):
         ok = "\n".join(l for l in self.SELFTEST.splitlines() if "WARN" not in l and "FAIL" not in l)
         ok = ok.replace("3 loaded: essentials, fleet, match",
-                        "8 loaded: deathmatch, essentials, fleet, match, midas, practice, skins, whitelist")
+                        "12 loaded: community, deathmatch, essentials, fleet, mapvote, match, midas, movement, "
+                        "practice, skins, tv, whitelist")
         # every need of every plugin resolved
         lines = []
         for pid, need in cr.load_needs(str(ROOT / "plugins")).items():
@@ -535,6 +537,20 @@ class CompatReportTest(unittest.TestCase):
         # no fleet result (live test not run for it): its check stays pending
         doc = self.dynamic("live", live=[("match", 0)])
         self.assertEqual(self.check(self.comp(doc, "fleet"), "livetest")["status"], "pending")
+
+    def test_dynamic_adds_components_the_base_lacks(self):
+        base, _ = self.result(plugins_dir=ROOT / "plugins")
+        base["components"] = [c for c in base["components"] if c["id"] != "tv"]
+        bp = self.tmp / "old-base.json"
+        bp.write_text(json.dumps(base))
+        sp = self.tmp / "readyup_selftest.txt"
+        sp.write_text(self.SELFTEST)
+        out = self.tmp / "dyn-old-base"
+        args = ["dynamic", "--stage", "selftest", "--base", str(bp), "--selftest", str(sp), "--out-dir", str(out),
+                "--gamedata", str(self.gamedata), "--plugins-dir", str(ROOT / "plugins")] + RUN
+        self.assertEqual(cr.main(args), 0)
+        doc = json.loads((out / "compat.json").read_text())
+        self.assertIn("tv", [c["id"] for c in doc["components"]])
 
     def test_dynamic_without_report_fails_core(self):
         doc = self.dynamic("selftest", selftest="")

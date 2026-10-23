@@ -278,6 +278,38 @@ if (!RU_API_HAS(api, grenade_spawn_available) || !api->grenade_spawn_available(a
 }
 ```
 
+### v1.17 (implemented)
+
+Respawning one player. Same engine module and feature table as 1.13 (`practice_engine.cpp`,
+`practice_engine_spec.h`), member in `plugin_engine_api.cpp`.
+
+| Member | Thread | Purpose |
+|---|---|---|
+| `player_respawn(self, slot)` | game | The dead player in `slot` (bots too) on T / CT respawns on their player pawn: `CBasePlayerController::SetPawn(pawn, true, false, false, false)` then `CCSPlayerController::Respawn`, as CounterStrikeSharp's `Respawn()`. 1 = respawned, 2 = already alive (nothing done), 0 = refused (bad slot, not on T / CT, no pawn) or unavailable. Feature `"respawn"` in `engine_feature_available` |
+
+The entries are the core's (`engine-surface.json`), since match warmup needs them without the
+practice component. `CCSPlayerController::Respawn` [276] is an anchors-only `vtable_indices` entry
+(no byte signature): two `mov_disp` field reads and a `string_ref` of the network state-change
+message; the call goes to the verified slot target after the controller's vptr check. SetPawn is a
+signature (CounterStrikeSharp's) with two `mov_disp` and a `caller_string` `player_disconnect`.
+Respawn works on the controller's current pawn, which is the observer pawn after a death, hence
+SetPawn first. Both are optional (`API_SURFACE` maps `player_respawn` to the entity system only):
+a break turns respawn off. The core declares `rtti` `CCSPlayerController` too; a fragment may
+repeat an rtti entry with the same typeinfo name and module (the practice one does). Verified on
+CS2 1.41.9.0 (`readyup_sigcheck`).
+
+User: match warmup respawns a human who joins T / CT, or whom the roster team lock moved, instead
+of restarting the warmup round (`mp_restartgame 1` stays the fallback without the feature or when
+it refuses).
+
+### v1.16 (implemented)
+
+The license check-in.
+
+| Member | Thread | Purpose |
+|---|---|---|
+| `license_key(self, buf, len)` | any | The server's paid license key (verified, not free), or -1. The license check-in (`license_checkin.cpp`, in both the match and the fleet plugin; one server id per server, one sender at a time) posts it to the license server a minute after load and every 15 minutes, so the license server counts the game servers that really run |
+
 ### v1.15 (implemented)
 
 The license standing for new matches.
@@ -327,30 +359,6 @@ Users: practice `.fas` / `.watchme` (everyone else to the spectators), `.showspa
 `.hidespawns` (a `beam` per competitive spawn: `m_fWidth`, `m_vecEndPos`, `m_clrRender`,
 `m_lifeState` written before `entity_spawn`), the view angle of `.loadnade`, `.last`, `.back N`
 and `.loadpos`; match `.spec`.
-
-### v1.16 (implemented)
-
-Respawning one player. Same engine module and feature table as 1.13 (`practice_engine.cpp`,
-`practice_engine_spec.h`), member in `plugin_engine_api.cpp`.
-
-| Member | Thread | Purpose |
-|---|---|---|
-| `player_respawn(self, slot)` | game | The dead player in `slot` (bots too) on T / CT respawns on their player pawn: `CBasePlayerController::SetPawn(pawn, true, false, false, false)` then `CCSPlayerController::Respawn`, as CounterStrikeSharp's `Respawn()`. 1 = respawned, 2 = already alive (nothing done), 0 = refused (bad slot, not on T / CT, no pawn) or unavailable. Feature `"respawn"` in `engine_feature_available` |
-
-The entries are the core's (`engine-surface.json`), since match warmup needs them without the
-practice component. `CCSPlayerController::Respawn` [276] is an anchors-only `vtable_indices` entry
-(no byte signature): two `mov_disp` field reads and a `string_ref` of the network state-change
-message; the call goes to the verified slot target after the controller's vptr check. SetPawn is a
-signature (CounterStrikeSharp's) with two `mov_disp` and a `caller_string` `player_disconnect`.
-Respawn works on the controller's current pawn, which is the observer pawn after a death, hence
-SetPawn first. Both are optional (`API_SURFACE` maps `player_respawn` to the entity system only):
-a break turns respawn off. The core declares `rtti` `CCSPlayerController` too; a fragment may
-repeat an rtti entry with the same typeinfo name and module (the practice one does). Verified on
-CS2 1.41.9.0 (`readyup_sigcheck`).
-
-User: match warmup respawns a human who joins T / CT, or whom the roster team lock moved, instead
-of restarting the warmup round (`mp_restartgame 1` stays the fallback without the feature or when
-it refuses).
 
 ### ABI rules
 

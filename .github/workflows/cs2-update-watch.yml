@@ -8,7 +8,11 @@ name: CS2 update watch
 # and verify gamedata/engine-surface.json with readyup_sigcheck + readyup_hookcheck.
 #
 #   fail -> failing job + markdown summary, open/refresh issue labeled `cs2-update`,
-#           Discord post if secret DISCORD_WEBHOOK_URL is set
+#           Discord post if secret DISCORD_WEBHOOK_URL is set; readyup_sigfix (tools/sigfix.h)
+#           tries to repair the failing signatures, and if it changed any, a PR on branch
+#           cs2-autofix/<buildid> carries them. It merges and releases itself only when every
+#           entry is fixed and sigcheck + hookcheck, the build and cs2-dynamic (when on) pass;
+#           anything else leaves the PR and the issue for a human.
 #   pass -> "CS2 build N verified" (on the open issue, which is closed; else on the commit)
 #
 #   both -> compat.json + badge.json (scripts/ci/compat-report.py): per-component result in the
@@ -115,6 +119,8 @@ jobs:
     outputs:
       verdict: ${{ steps.verify.outputs.verdict }}
       patch_version: ${{ steps.verify.outputs.patch_version }}
+      autofix: ${{ steps.autofix.outputs.changed }}
+      autofix_verified: ${{ steps.autofix.outputs.verified }}
     steps:
       - uses: actions/checkout@v4
 
@@ -141,11 +147,11 @@ jobs:
             --trigger "${{ needs.check.outputs.trigger }}" --started-at "${{ needs.check.outputs.started_at }}"
           python3 scripts/ci/compat-report.py post .ci/checking.json
 
-      - name: Build readyup_sigcheck + readyup_hookcheck
+      - name: Build readyup_sigcheck + readyup_hookcheck + readyup_sigfix
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           CC=gcc-14 CXX=g++-14 cmake -S . -B build-tools -DCMAKE_BUILD_TYPE=Release >/dev/null
-          cmake --build build-tools --target readyup_sigcheck readyup_hookcheck -j"$(nproc)"
+          cmake --build build-tools --target readyup_sigcheck readyup_hookcheck readyup_sigfix -j"$(nproc)"
 
       - name: sigcheck + hookcheck -> report.md, compat.json, badge.json
         id: verify
@@ -165,6 +171,57 @@ jobs:
             || echo "::warning::compat-report.py failed; the verdict below still stands"
           if [ $rc -eq 0 ]; then echo "verdict=pass" >> "$GITHUB_OUTPUT"; else echo "verdict=fail" >> "$GITHUB_OUTPUT"; fi
           exit $rc
+
+      # Repairs what it can in gamedata/ and re-verifies; the autofix job turns it into a PR.
+      - name: 'Autofix: readyup_sigfix, then verify again'
+        id: autofix
+        if: failure() && steps.verify.outputs.verdict == 'fail'
+        shell: bash
+        env:
+          BUILDID: ${{ needs.check.outputs.buildid }}
+          PATCH: ${{ steps.verify.outputs.patch_version }}
+        run: |
+          libs=()
+          for m in engine2 tier0 schemasystem; do
+            so="$CS2_DIR/game/bin/linuxsteamrt64/lib$m.so"
+            [ -f "$so" ] && libs+=(--lib "$m=$so")
+          done
+          set +e
+          build-tools/readyup_sigfix --game-version "$PATCH" --buildid "$BUILDID" \
+            "$CS2_DIR/game/csgo/bin/linuxsteamrt64/libserver.so" gamedata/engine-surface.json gamedata/engine-surface.*.json \
+            "${libs[@]}" > .ci/sigfix.md
+          scripts/ci/verify-cs2.sh "$CS2_DIR" build-tools .ci/report-fixed.md
+          rc=$?
+          set -e
+          cat .ci/sigfix.md >> "$GITHUB_STEP_SUMMARY"
+          if git diff --quiet -- gamedata; then echo "changed=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+          echo "verified=$([ $rc -eq 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          mkdir -p .ci/autofix
+          cp gamedata/engine-surface*.json .ci/autofix/
+          {
+            echo "CS2 $PATCH (build $BUILDID) broke the engine surface, and \`readyup_sigfix\` rewrote what it could find again."
+            echo
+            echo "If every entry is fixed and sigcheck + hookcheck pass, the watch runs the build, squash-merges this, runs cs2-dynamic (when on) and tags the next beta. Otherwise it stays open for a human."
+            echo
+            echo "**Risk:** sigcheck can't see an argument change behind a changed prologue. A wrong match calls the wrong function and crashes servers."
+            echo
+            cat .ci/sigfix.md
+            echo
+            echo "## Verify again with these files"
+            echo
+            cat .ci/report-fixed.md
+            echo
+            echo "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          } > .ci/autofix/body.md
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Upload autofix
+        if: always() && steps.autofix.outputs.changed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: cs2-autofix-${{ needs.check.outputs.buildid }}
+          path: .ci/autofix/
+          retention-days: 90
 
       - name: Upload report
         if: always()
@@ -239,6 +296,117 @@ jobs:
         run: |
           echo "::error::CS2 build $BUILDID broke gamedata/engine-surface.json; see the verify job summary."
           exit 1
+
+  # readyup_sigfix changed gamedata: commit it to cs2-autofix/<buildid> and open (or refresh) a
+  # PR. When the second verify passed, also ship it (the Ship step).
+  autofix:
+    name: Open autofix PR
+    needs: [check, verify]
+    if: always() && needs.verify.outputs.autofix == 'true'
+    runs-on: ubuntu-latest
+    # The Ship step waits for the build, cs2-dynamic (self-hosted, up to ~2 h) and the release build.
+    timeout-minutes: 240
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      BUILDID: ${{ needs.check.outputs.buildid }}
+      PATCH: ${{ needs.verify.outputs.patch_version }}
+      VERIFIED: ${{ needs.verify.outputs.autofix_verified }}
+      BASE: ${{ github.event.repository.default_branch }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: cs2-autofix-${{ needs.check.outputs.buildid }}
+          path: .ci/autofix
+
+      - name: Commit + open the PR
+        id: pr
+        run: |
+          branch="cs2-autofix/$BUILDID"
+          title="fix(gamedata): signatures for CS2 $PATCH (autofix)"
+          [ "$VERIFIED" = "true" ] || title="fix(gamedata): signatures for CS2 $PATCH (autofix, still failing)"
+          cp .ci/autofix/engine-surface*.json gamedata/
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git commit -am "$title" -m "Written by readyup_sigfix in $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          git push --force origin "$branch"
+          pr="$(gh pr list --head "$branch" --state open --json number -q '.[0].number')"
+          if [ -n "$pr" ]; then
+            gh pr edit "$pr" --title "$title" --body-file .ci/autofix/body.md
+          else
+            gh pr create --head "$branch" --base "$BASE" --title "$title" --body-file .ci/autofix/body.md
+          fi
+          echo "number=$(gh pr list --head "$branch" --state open --json number -q '.[0].number')" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      # Every failing entry fixed and sigcheck + hookcheck pass again: merge and release without a
+      # human. Pushes with the workflow token start no workflows, so the build (the PR's CI),
+      # cs2-dynamic and the release build are dispatched and waited for. The first failure stops
+      # it: nothing more is merged or released, and the PR / issue stay for a human.
+      - name: 'Ship: build, merge, cs2-dynamic, release'
+        if: env.VERIFIED == 'true'
+        env:
+          PR: ${{ steps.pr.outputs.number }}
+          SHA: ${{ steps.pr.outputs.sha }}
+          DYNAMIC: ${{ vars.CS2_DYNAMIC_ENABLED }}
+        run: |
+          run_and_wait() {  # <workflow file> <ref>
+            local since
+            id=""  # the run's id, for the caller
+            since="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            gh workflow run "$1" --ref "$2"
+            for _ in $(seq 1 30); do
+              sleep 10
+              id="$(gh run list --workflow "$1" --event workflow_dispatch --limit 10 --json databaseId,createdAt,headBranch \
+                -q "[.[] | select(.createdAt >= \"$since\" and .headBranch == \"$2\")][0].databaseId // empty")"
+              [ -n "$id" ] && break
+            done
+            [ -n "$id" ] || { echo "::error::no $1 run started for $2"; return 1; }
+            echo "$1 on $2: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$id"
+            gh run watch "$id" --exit-status --interval 60 >/dev/null
+          }
+          run_and_wait build.yml "cs2-autofix/$BUILDID"
+          gh pr merge "$PR" --squash --match-head-commit "$SHA"
+          merged="$(gh pr view "$PR" --json mergeCommit -q .mergeCommit.oid)"
+          if [ "$DYNAMIC" = "true" ]; then
+            run_and_wait cs2-dynamic.yml "$BASE"
+            # The run succeeds even when its verdict fails, so read the compat.json it recorded on
+            # cs2-build. Its static checks (signature, ...) are copied from the watch's verdict from
+            # before the fix: only its own checks count. Another run recorded since -> no release.
+            git fetch -q --depth=1 origin refs/heads/cs2-build
+            git show FETCH_HEAD:compat.json > .ci/dynamic.json
+            python3 - .ci/dynamic.json "$id" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          if d["run"]["id"] != sys.argv[2]:
+              sys.exit("::error::compat.json on cs2-build is from run %s, not %s" % (d["run"]["id"], sys.argv[2]))
+          own = [(c["id"], k["kind"], k["status"]) for c in d["components"] for k in c["checks"]
+                 if k["kind"] in ("selftest", "schema", "event", "livetest")]
+          for o in own:
+              print(*o)
+          selftests = [s for _, k, s in own if k == "selftest"]
+          if not selftests or any(s != "pass" for s in selftests) or any(s == "fail" for _, _, s in own):
+              sys.exit("::error::cs2-dynamic did not pass its own checks (above)")
+          PY
+          else
+            echo "::warning::cs2-dynamic is off (CS2_DYNAMIC_ENABLED): releasing without the real-server test"
+          fi
+          # The release flow of docs/RELEASING.md: an annotated tag on master, built by build.yml.
+          # shortcut: assumes the newest tag is a beta (true while there is no stable release); move
+          # to the next stable / rc by hand with release.sh.
+          last="$(git ls-remote --tags --refs origin 'v*-beta.*' | sed 's#.*refs/tags/##' | sort -V | tail -1)"
+          tag="${last%.*}.$(( ${last##*.} + 1 ))"
+          git fetch -q origin "$merged"
+          git tag -a "$tag" -m "Ready Up $tag" "$merged"
+          git push origin "$tag"
+          run_and_wait build.yml "$tag"
+          gh pr comment "$PR" --body "Merged and released automatically as [$tag]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$tag)$([ "$DYNAMIC" = "true" ] || echo ", without cs2-dynamic (off)")."
 
   # The verify job ended without a verdict (download error, runner problem): nothing is
   # recorded on cs2-build (the next run retries), but a listener still hears that this run is over.

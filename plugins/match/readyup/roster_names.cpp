@@ -163,6 +163,24 @@ void RosterNamesInstall(const ru_api* api) {
   }
 }
 
+void RosterNamesNameBot(const std::string& botName, const std::string& name) {
+  Guarded([&] {
+    if (!g_api || !Offsets() || name.empty() || botName == name) return;
+    for (int index = 1; index <= 64; ++index) {
+      void* ent = g_api->entity_by_index(g_api->self, index);
+      const char* cls = ent ? g_api->entity_classname(g_api->self, ent) : nullptr;
+      if (!cls || std::strcmp(cls, "cs_player_controller") != 0) continue;
+      auto* c = static_cast<unsigned char*>(ent);
+      uint64_t sid = 0;
+      std::memcpy(&sid, c + g_steamOff, sizeof(sid));
+      if (sid != 0 || NameOf(c) != botName) continue;  // bots have no SteamID
+      WriteName(c, name);
+      Print("roster-names: bot \"%s\" plays as \"%s\"\n", botName.c_str(), name.c_str());
+      return;
+    }
+  });
+}
+
 void RosterNamesUninstall() {
   Guarded([] {
     if (!g_api || !Offsets()) return;

@@ -31,6 +31,9 @@ constexpr const char* kStateSetting = "readyup_license_state";
 // has stopped). Any thread.
 std::string StoppedMessage();
 
+// The key when it verifies and is paid (not free), else "": for the license check-in (plugin api 1.16).
+std::string PaidKey();
+
 // The license answer install.sh records (docs/INSTALL.md "License"): `readyup_license_accepted
 // "noncommercial"|"commercial"` and `readyup_license_accepted_at "<ISO time>"` in
 // csgo/cfg/ReadyUp/license.cfg (read at load; the same settings also work from any cfg or the

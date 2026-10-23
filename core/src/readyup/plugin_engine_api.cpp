@@ -333,6 +333,16 @@ int ApiLicenseStopped(ru_plugin* self, char* buf, uint32_t len) {
   return static_cast<int>(why.size());
 }
 
+// ---- v1.16 --------------------------------------------------------------------------
+
+int ApiLicenseKey(ru_plugin* self, char* buf, uint32_t len) {
+  if (!self) return -1;
+  const std::string key = license::PaidKey();
+  if (key.empty()) return -1;
+  if (buf && len > 0) std::snprintf(buf, len, "%s", key.c_str());
+  return static_cast<int>(key.size());
+}
+
 // ---- v1.10 --------------------------------------------------------------------------
 
 int ApiSetCoreSetting(ru_plugin* self, const char* key, const char* value) {
@@ -435,7 +445,7 @@ int ApiEntitySpawn(ru_plugin* self, void* ent) {
   return 0;
 }
 
-// ---- v1.16 --------------------------------------------------------------------------
+// ---- v1.17 --------------------------------------------------------------------------
 
 int ApiPlayerRespawn(ru_plugin* self, int slot) {
   if (!CheckGameThread(self, "player_respawn")) return 0;
@@ -494,7 +504,8 @@ void detail::FillEngineApi(ru_api* a) {
   a->entity_create = &ApiEntityCreate;
   a->entity_spawn = &ApiEntitySpawn;
   a->license_stopped = &ApiLicenseStopped;                        // v1.15
-  a->player_respawn = &ApiPlayerRespawn;                          // v1.16
+  a->license_key = &ApiLicenseKey;                                // v1.16
+  a->player_respawn = &ApiPlayerRespawn;                          // v1.17
 }
 
 }  // namespace readyup::plugins

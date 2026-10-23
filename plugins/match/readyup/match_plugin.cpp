@@ -7,6 +7,7 @@
 // and the ready HUD, and the match part of the local status endpoint (readyup.match.v1).
 // It talks to the engine only through ru_api (host.cpp); `ru plugin reload match` keeps the
 // match going (reload_state.h lists what survives).
+#include "readyup/license_checkin.h"
 #include "readyup/plugin_api.h"
 #include "readyup/match_iface.h"
 #include "readyup/selftest_iface.h"
@@ -22,6 +23,7 @@
 #include "readyup/fleet_bridge.h"
 #include "readyup/game_timers.h"
 #include "readyup/host.h"
+#include "readyup/http_client.h"
 #include "readyup/idle_refresh.h"
 #include "readyup/warmup_ammo.h"
 #include "readyup/warmup_money.h"
@@ -543,7 +545,7 @@ extern "C" {
 READYUP_PLUGIN_EXPORT const ru_plugin_info* readyup_plugin_info(void) {
   static const ru_plugin_info info = {
       sizeof(ru_plugin_info),
-      (1u << 16) | 16u,  // requires 1.16 (player_respawn sits at the 1.16 offset; a core with another layout refuses it); older members via RU_API_HAS
+      (1u << 16) | 17u,  // requires 1.17 (player_respawn sits at the 1.17 offset; a core with another layout refuses it); older members via RU_API_HAS
       "match",
       MATCH_VERSION,
       "Ready Up",
@@ -573,7 +575,11 @@ READYUP_PLUGIN_EXPORT int readyup_plugin_load(const ru_api* api, uint32_t core_a
     workers::Start();
     {
       const char* dir = RU_API_HAS(api, data_dir) ? api->data_dir(api->self) : nullptr;
-      local_store::Init(dir && *dir ? std::string(dir) : GetThisModuleDir() + "/../../plugins/match");
+      const std::string dataDir = dir && *dir ? std::string(dir) : GetThisModuleDir() + "/../../plugins/match";
+      local_store::Init(dataDir);
+      // The license server counts the game servers that run (license_checkin.h).
+      license_checkin::Start(api, dataDir, MATCH_VERSION,
+                             [](const std::string& url, const std::string& body) { (void)HttpPostJson(url, std::nullopt, body); });
     }
     (void)ReloadCfg(nullptr);
     match_settings::Install();  // server settings saved in state.json (server_settings.h)
@@ -648,6 +654,7 @@ READYUP_PLUGIN_EXPORT int readyup_plugin_load(const ru_api* api, uint32_t core_a
     rc = 2;
   }
   if (rc != 0) {
+    license_checkin::Stop();
     workers::Shutdown();
     host::Detach();
   }
@@ -659,6 +666,7 @@ READYUP_PLUGIN_EXPORT void readyup_plugin_unload(void) {
     // Without the match flow nothing may keep rounds from ending.
     if (g_api) g_api->set_round_termination_suppressed(g_api->self, 0);
     RosterNamesUninstall();  // players get their own names back
+    license_checkin::Stop();
     workers::Shutdown();  // webhook sender, store writer (saves what is pending), admin refresh, demo uploads, ...
     ReloadStateSave();
     fleet_bridge::Uninstall();  // fleet.so cannot see this plugin unload (fleet_iface.h)

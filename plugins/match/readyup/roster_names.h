@@ -19,10 +19,16 @@
 
 #include "readyup/plugin_api.h"
 
+#include <string>
+
 namespace readyup {
 
 void RosterNamesInstall(const ru_api* api);
 // Plugin unload: our names back to the players' own names.
 void RosterNamesUninstall();
+// Simulation: the bot named `botName` plays a roster player; it takes that player's `name`, so the
+// scoreboard, GOTV and the demo show who it stands in for (the demo analysis maps it back by name).
+// Game thread.
+void RosterNamesNameBot(const std::string& botName, const std::string& name);
 
 }  // namespace readyup

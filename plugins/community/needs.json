@@ -4,39 +4,32 @@
   "api": [
     "chat_all",
     "chat_to_slot",
-    "config_get",
-    "data_dir",
     "entity_by_index",
     "entity_from_handle",
     "entity_system_status",
-    "ev_get_int",
-    "ev_get_player_slot",
-    "get_player",
-    "is_admin",
     "on_tick",
     "register_chat_command",
     "schema_offset",
-    "server_command",
     "subscribe_game_event"
   ],
   "surface": [
-    "CCommand",
     "CGameEventManager",
     "CGameEventManager_Init",
-    "CServerSideClient_GameEventLegacyProxy",
+    "CSchemaSystem",
+    "CSchemaSystemTypeScope",
     "ClientPrint",
-    "ISource2GameClients::ClientCommand",
-    "ISource2Server::GameFrame",
     "Host_Say",
-    "LegacyGameEventListener"
+    "ISource2Server::GameFrame",
+    "UTIL_ClientPrintAll",
+    "UTIL_Remove"
   ],
-  "schema": [],
-  "schema_optional": [
+  "schema": [
     "CBasePlayerPawn.m_pObserverServices",
     "CCSPlayerController.m_hObserverPawn",
     "CCSPlayerController.m_hPlayerPawn",
     "CPlayer_ObserverServices.m_hObserverTarget"
   ],
+  "schema_optional": [],
   "events": [
     "player_death"
   ]

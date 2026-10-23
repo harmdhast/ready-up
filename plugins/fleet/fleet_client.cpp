@@ -1513,4 +1513,27 @@ void Client::Run() {
   spool_.FlushMeta();
 }
 
+void PostJson(const std::string& url, const std::string& body) {
+  CURL* c = curl_easy_init();
+  if (!c) return;
+  const ClientConfig cfg;
+  std::string resp;
+  curl_slist* hdrs = curl_slist_append(nullptr, "Content-Type: application/json");
+  curl_easy_setopt(c, CURLOPT_URL, url.c_str());
+  curl_easy_setopt(c, CURLOPT_POST, 1L);
+  curl_easy_setopt(c, CURLOPT_POSTFIELDS, body.c_str());
+  curl_easy_setopt(c, CURLOPT_POSTFIELDSIZE, static_cast<long>(body.size()));
+  curl_easy_setopt(c, CURLOPT_HTTPHEADER, hdrs);
+  curl_easy_setopt(c, CURLOPT_USERAGENT, cfg.userAgent.c_str());
+  curl_easy_setopt(c, CURLOPT_NOSIGNAL, 1L);
+  curl_easy_setopt(c, CURLOPT_CONNECTTIMEOUT_MS, static_cast<long>(cfg.connectTimeoutMs));
+  curl_easy_setopt(c, CURLOPT_TIMEOUT_MS, static_cast<long>(cfg.httpTimeoutMs));
+  curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, &CollectBody);
+  curl_easy_setopt(c, CURLOPT_WRITEDATA, &resp);
+  ApplyTls(c, cfg);
+  (void)curl_easy_perform(c);
+  curl_slist_free_all(hdrs);
+  curl_easy_cleanup(c);
+}
+
 }  // namespace fleet
