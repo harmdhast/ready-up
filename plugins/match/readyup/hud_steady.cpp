@@ -17,19 +17,22 @@ constexpr int kMaxIndex = 2048;
 int g_offRules = -2, g_offRestart = -2, g_offRestartTime = -2, g_offRoundStart = -2;  // -2 = not looked up
 uint32_t g_proxy = 0xFFFFFFFFu;  // cs_gamerules handle
 bool g_logged = false;
+bool g_missLogged = false;
 bool g_scanned = false;  // one full scan per map when cs_gamerules is missing
 
 bool Resolve(const ru_api* a) {
-  if (g_offRules == -2) {
-    g_offRules = a->schema_offset(a->self, "CCSGameRulesProxy", "m_pGameRules");
-    g_offRestart = a->schema_offset(a->self, "CCSGameRules", "m_bGameRestart");
-    g_offRestartTime = a->schema_offset(a->self, "CCSGameRules", "m_flRestartRoundTime");
-    g_offRoundStart = a->schema_offset(a->self, "CCSGameRules", "m_fRoundStartTime");
-    if (g_offRules < 0 || g_offRestart < 0 || g_offRestartTime < 0 || g_offRoundStart < 0) {
-      Print("hud-steady: game rules fields not found; center panels may blink\n");
-    }
+  const auto ok = [] { return g_offRules >= 0 && g_offRestart >= 0 && g_offRestartTime >= 0 && g_offRoundStart >= 0; };
+  if (ok()) return true;
+  // A miss is looked up again on the next tick (the schema may not be verified yet); logged once.
+  g_offRules = a->schema_offset(a->self, "CCSGameRulesProxy", "m_pGameRules");
+  g_offRestart = a->schema_offset(a->self, "CCSGameRules", "m_bGameRestart");
+  g_offRestartTime = a->schema_offset(a->self, "CCSGameRules", "m_flRestartRoundTime");
+  g_offRoundStart = a->schema_offset(a->self, "CCSGameRules", "m_fRoundStartTime");
+  if (!ok() && !g_missLogged) {
+    g_missLogged = true;
+    Print("hud-steady: game rules fields not found; center panels may blink\n");
   }
-  return g_offRules >= 0 && g_offRestart >= 0 && g_offRestartTime >= 0 && g_offRoundStart >= 0;
+  return ok();
 }
 
 void* Proxy(const ru_api* a) {
