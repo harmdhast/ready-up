@@ -27,18 +27,26 @@ uint32_t g_teams[kMaxTeams];
 int g_teamCount = 0;
 int g_cursor = 1;
 double g_holdUntil = 0;
+bool g_loggedScore = false, g_loggedTeamNum = false;
 bool g_active = false;  // WarmupScoreResetActive on the last tick
 bool g_presetActive = false;  // the resume warmup's score was written on the last tick
 
 bool Resolve(const ru_api* a) {
   if (a->entity_system_status(a->self) != RU_ENTSYS_OK) return false;
-  if (g_offScore == -2) {
+  // A miss is looked up again on the next tick (the schema may not be verified yet); logged once.
+  if (g_offScore < 0) {
     g_offScore = a->schema_offset(a->self, "CTeam", "m_iScore");
-    if (g_offScore < 0) Print("warmup-score: schema field CTeam::m_iScore missing; warmup scores are not reset\n");
+    if (g_offScore < 0 && !g_loggedScore) {
+      g_loggedScore = true;
+      Print("warmup-score: schema field CTeam::m_iScore missing; warmup scores are not reset\n");
+    }
   }
-  if (g_offTeamNum == -2) {
+  if (g_offTeamNum < 0) {
     g_offTeamNum = a->schema_offset(a->self, "CBaseEntity", "m_iTeamNum");
-    if (g_offTeamNum < 0) Print("warmup-score: schema field CBaseEntity::m_iTeamNum missing; resume scores are not shown\n");
+    if (g_offTeamNum < 0 && !g_loggedTeamNum) {
+      g_loggedTeamNum = true;
+      Print("warmup-score: schema field CBaseEntity::m_iTeamNum missing; resume scores are not shown\n");
+    }
   }
   return g_offScore >= 0;
 }
@@ -92,6 +100,7 @@ void PresetResumeScore(const ru_api* a, int team1, int team2, bool team1Ct) {
 void WarmupScoreInstall(const ru_api*) {
   g_offScore = -2;
   g_offTeamNum = -2;
+  g_loggedScore = g_loggedTeamNum = false;
   ForgetTeams();
   g_active = false;
   g_presetActive = false;

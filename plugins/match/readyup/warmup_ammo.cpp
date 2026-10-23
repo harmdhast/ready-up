@@ -30,18 +30,18 @@ T Rd(const void* base, int off) {
 }
 
 bool Resolve(const ru_api* a) {
-  if (!g_off.resolved) {
-    if (a->entity_system_status(a->self) != RU_ENTSYS_OK) return false;
-    g_off.pawn = a->schema_offset(a->self, "CCSPlayerController", "m_hPlayerPawn");
-    g_off.weaponServices = a->schema_offset(a->self, "CBasePlayerPawn", "m_pWeaponServices");
-    g_off.myWeapons = a->schema_offset(a->self, "CPlayer_WeaponServices", "m_hMyWeapons");
-    g_off.reserve = a->schema_offset(a->self, "CBasePlayerWeapon", "m_pReserveAmmo");
+  if (g_off.Ok()) return true;
+  if (a->entity_system_status(a->self) != RU_ENTSYS_OK) return false;
+  // A miss is looked up again on the next tick (the schema may not be verified yet); logged once.
+  g_off.pawn = a->schema_offset(a->self, "CCSPlayerController", "m_hPlayerPawn");
+  g_off.weaponServices = a->schema_offset(a->self, "CBasePlayerPawn", "m_pWeaponServices");
+  g_off.myWeapons = a->schema_offset(a->self, "CPlayer_WeaponServices", "m_hMyWeapons");
+  g_off.reserve = a->schema_offset(a->self, "CBasePlayerWeapon", "m_pReserveAmmo");
+  if (!g_off.Ok() && !g_off.resolved) {
     g_off.resolved = true;
-    if (!g_off.Ok()) {
-      Print("warmup-ammo: schema fields missing (pawn=%d services=%d weapons=%d reserve=%d); warmup ammo is not "
-            "infinite\n",
-            g_off.pawn, g_off.weaponServices, g_off.myWeapons, g_off.reserve);
-    }
+    Print("warmup-ammo: schema fields missing (pawn=%d services=%d weapons=%d reserve=%d); warmup ammo is not "
+          "infinite\n",
+          g_off.pawn, g_off.weaponServices, g_off.myWeapons, g_off.reserve);
   }
   return g_off.Ok();
 }
