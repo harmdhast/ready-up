@@ -264,20 +264,35 @@ static void TestStatsRestore() {
 }
 
 static void TestMapEndPlan() {
+  // No demo: the kick follows the configured delay; the reset waits for the kick (+2s) and the engine window.
   auto p = ComputeMapEndPlan(/*demo=*/false, /*upload=*/false, 10, 5, 10, 60);
   CHECK_EQ(p.restartDelay, 10);
   CHECK_EQ(p.tvFlushDelay, 0);
-  CHECK_EQ(p.kickDelay, 14);
+  CHECK_EQ(p.kickDelay, 5);
+  CHECK_EQ(p.resetDelay, 9);
+  p = ComputeMapEndPlan(false, false, 10, 30, 10, 60);
+  CHECK_EQ(p.kickDelay, 30);
+  CHECK_EQ(p.resetDelay, 32);
+  // Demo: the kick ignores the GOTV flush; the reset waits for it.
   p = ComputeMapEndPlan(true, false, 0, 5, 10, 60);
   CHECK_EQ(p.tvFlushDelay, 15);
   CHECK_EQ(p.restartDelay, 15);
-  CHECK_EQ(p.kickDelay, 24);
+  CHECK_EQ(p.kickDelay, 10);
+  CHECK_EQ(p.resetDelay, 14);
   p = ComputeMapEndPlan(true, true, 10, 5, 10, 60);
   CHECK_EQ(p.tvFlushDelay, 25);
   CHECK_EQ(p.restartDelay, 35);
-  CHECK_EQ(p.kickDelay, 94);
-  p = ComputeMapEndPlan(true, true, 120, 5, 10, 60);
-  CHECK_EQ(p.tvFlushDelay, 135);
+  CHECK_EQ(p.kickDelay, 60);
+  CHECK_EQ(p.resetDelay, 62);
+  p = ComputeMapEndPlan(true, true, 105, 5, 30, 30);
+  CHECK_EQ(p.tvFlushDelay, 120);
+  CHECK_EQ(p.restartDelay, 130);
+  CHECK_EQ(p.kickDelay, 30);
+  CHECK_EQ(p.resetDelay, 129);
+  // Extra 0: kick at once; negative extras clamp to 0.
+  p = ComputeMapEndPlan(true, true, 105, 0, 0, -3);
+  CHECK_EQ(p.kickDelay, 0);
+  CHECK_EQ(p.resetDelay, 129);
 }
 
 static void TestSeriesOver() {
