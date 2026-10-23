@@ -286,15 +286,15 @@ static std::string ReadyHtml(const Board& b, uint64_t viewer, const std::string&
     if (st.ready) {
       h += "<font class='fontSize-l' color='" + std::string(kOk) + "'><b>YOUR TEAM IS READY</b></font><br>";
     } else if (st.allHere) {
-      h += "<font class='fontSize-xl' color='" + std::string(kNo) + "'><b>YOUR TEAM IS NOT READY</b></font><br>";
+      h += "<font class='fontSize-l' color='" + std::string(kNo) + "'><b>YOUR TEAM IS NOT READY</b></font><br>";
       h += Font(kGold, "type <b>.r</b> to ready your whole team") + "<br>";
     } else {
-      h += "<font class='fontSize-xl' color='" + std::string(kNo) + "'><b>WAITING FOR YOUR TEAM (" +
+      h += "<font class='fontSize-l' color='" + std::string(kNo) + "'><b>WAITING FOR YOUR TEAM (" +
            std::to_string(st.here) + "/" + n + " here)</b></font><br>";
       h += Font(kGold, "one <b>.r</b> readies everyone once all " + n + " are in") + "<br>";
     }
   } else if (me && !me->ready) {
-    h += "<font class='fontSize-xl' color='" + std::string(kNo) + "'><b>YOU ARE NOT READY</b></font><br>";
+    h += "<font class='fontSize-l' color='" + std::string(kNo) + "'><b>YOU ARE NOT READY</b></font><br>";
     h += Font(kGold, "type <b>.r</b> in chat to ready up") + "<br>";
   } else if (me) {
     h += "<font class='fontSize-l' color='" + std::string(kOk) + "'><b>YOU ARE READY</b></font><br>";
