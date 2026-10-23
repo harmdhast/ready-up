@@ -24,7 +24,7 @@ curl -fsSL https://raw.githubusercontent.com/harmdhast/ready-up/<tag>/install.sh
 
 ## Branches in custom
 
-Based on upstream `master` 7632335 (Release v0.1.0-beta.70 is fd633ba). Conflicts are between branches. Merge order is the table order.
+Based on upstream `master` 8f3ecf5 (v0.1.0-beta.77 is 0b7ce93). Conflicts are between branches. Merge order is the table order.
 
 | Branch | Summary | Status | Conflicts with other branches | Resolved in custom |
 |---|---|---|---|---|
@@ -37,7 +37,7 @@ Based on upstream `master` 7632335 (Release v0.1.0-beta.70 is fd633ba). Conflict
 | fix/warmup-round-end | A round scored in warmup restarts the game and resends the warmup rules | merged | `modes.cpp` with warmup-reapply, backups-live-only; `match_host_test.cpp` with autokick, warmup-reapply; `match_plugin.cpp`, `match_rules_test.cpp`, `test_compat_report.py` with warmup-infinite-ammo | `State` fields of both kept; scrim and match score tests both kept; the same-map reload test now expects the reset once the map has loaded, since a reload counts as loaded |
 | fix/warmup-infinite-ammo | Warmup reserve ammo without `sv_cheats` | merged | `match_host_test.cpp`, `match_rules_test.cpp`, `test_compat_report.py`, `match_plugin.cpp` with warmup-round-end; `match_host_test.cpp` with autokick, warmup-reapply | Both tick calls and both test sets kept; compat schema total updated again by hud-blink |
 | fix/reconnect-team | Team lock reads the team from the log header and logs a move once | merged | `CMakeLists.txt`, `modes.cpp`, `match_host_test.cpp` with warmup-join-spawn | upstream #243 moves players by the engine team (`TeamMoveNeeded`, `MoveRetryCap`); the log header parse (`log_header.h`) stays, a move is reported once when the engine or the registry shows it landed |
-| fix/warmup-join-spawn | Respawn only the joining player in match warmup (`player_respawn`, ru_api 1.16) | merged | `CMakeLists.txt`, `modes.cpp`, `match_host_test.cpp` with reconnect-team; `modes.cpp`, `modes.h` with warmup-reapply | Both CMake test targets kept; `ModesOnMapLoaded` and `ModesOnHumanJoinedTeam(slot, steamid, team)` both declared; a team-lock move logs "moved" once and calls the respawn only when it landed, "could not move" once when refused; upstream #216 keeps the debounced warmup restart: it is the fallback here when the respawn is refused or unavailable; `player_respawn` at 1.16 changes the ru_api layout, so match.so now declares 1.16 and a core of the older layout refuses it; a custom.* match.so built before this sync must not run on this core |
+| fix/warmup-join-spawn | Respawn only the joining player in match warmup (`player_respawn`, ru_api 1.16) | merged | `CMakeLists.txt`, `modes.cpp`, `match_host_test.cpp` with reconnect-team; `modes.cpp`, `modes.h` with warmup-reapply | Both CMake test targets kept; `ModesOnMapLoaded` and `ModesOnHumanJoinedTeam(slot, steamid, team)` both declared; a team-lock move logs "moved" once and calls the respawn only when it landed, "could not move" once when refused; upstream #216 keeps the debounced warmup restart: it is the fallback here when the respawn is refused or unavailable; `player_respawn` at 1.16 changes the ru_api layout, so match.so now declares 1.17 and a core of the older layout refuses it; a custom.* match.so built before the beta.77 sync must not run on this core |
 | fix/fleet-replay-before-handlers | Fleet holds match messages until the match plugin can take them | merged | `fleet_integration_test.cpp` with busy-reason, cmd-reset, cmd-add-time | |
 | fix/stale-round-backups | A fresh assignment removes round backups an earlier match with the same id left | merged | `fleet_bridge.cpp` with restore-round-zero-backup | |
 | fix/restore-round-zero-backup | A failover resume no longer forwards its go-live round backup as round 1 | merged | `fleet_bridge.cpp` with stale-round-backups, backups-live-only; `fleet_state_test.cpp` with assign-match-id; `FLEET.md` with backups-live-only | Stale removal runs first, then the first backup map and round are set |
@@ -59,6 +59,7 @@ Based on upstream `master` 7632335 (Release v0.1.0-beta.70 is fd633ba). Conflict
 ## Upstream syncs
 
 - merge/upstream-sync-beta70: `upstream/master` 7632335 (v0.1.0-beta.70) merged. 20 files conflicted. ru_api: upstream 1.14 (`filter_client_command`) and 1.15 (`license_stopped`) kept, `player_respawn` moved from 1.14 to 1.16. Protocol and capability lists are unions. Compat schema total for match is 36.
+- merge/upstream-sync-beta77: `upstream/master` 8f3ecf5 (v0.1.0-beta.77, tag on 0b7ce93) merged. 3 files conflicted (`plugin_api.h`, `plugin_engine_api.cpp`, `engine-surface.json`). Upstream took ru_api 1.16 for `license_key` (license check-in), so `player_respawn` moved from 1.16 to 1.17 (`READYUP_PLUGIN_API_VERSION_MINOR` 17; match.so requires 1.17; a core of the 1.16 layout refuses it). Gamedata is upstream's for CS2 1.41.9.2. `event.player_connect` protocol schema gained `address` (the platform's protocol copy must follow). No fork branch superseded. Compat schema total for match stays 36.
 
 ## Not in custom
 

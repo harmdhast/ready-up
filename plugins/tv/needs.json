@@ -3,16 +3,10 @@
   "plugin": "tv",
   "api": [
     "chat_to_slot",
-    "config_get",
-    "cvar_query",
-    "is_admin",
     "on_frame",
     "register_chat_command",
     "register_console_command_ex",
-    "register_ru_subcommand",
-    "server_command",
-    "subscribe",
-    "subscribe_log_line"
+    "register_ru_subcommand"
   ],
   "surface": [
     "CCommand",

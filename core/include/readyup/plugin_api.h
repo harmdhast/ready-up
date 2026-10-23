@@ -43,7 +43,7 @@ extern "C" {
 #endif
 
 #define READYUP_PLUGIN_API_VERSION_MAJOR 1
-#define READYUP_PLUGIN_API_VERSION_MINOR 16
+#define READYUP_PLUGIN_API_VERSION_MINOR 17
 #define READYUP_PLUGIN_API_VERSION \
   ((uint32_t)((READYUP_PLUGIN_API_VERSION_MAJOR << 16) | READYUP_PLUGIN_API_VERSION_MINOR))
 
@@ -701,7 +701,7 @@ typedef struct ru_api {
    * ("not available on this CS2 build"). A refused call logs why.
    */
   /* 1 if `feature` works on this build: "change_team" (player_change_team), "teleport"
-   * (player_teleport), "entity_create" (entity_create + entity_spawn), "respawn" (1.16
+   * (player_teleport), "entity_create" (entity_create + entity_spawn), "respawn" (1.17
    * player_respawn). 0 otherwise. Game thread. */
   int (*engine_feature_available)(ru_plugin* self, const char* feature);
   /* The player in `slot` joins `team` (RU_TEAM_SPECTATOR / _T / _CT) through
@@ -740,13 +740,20 @@ typedef struct ru_api {
   /* ==== v1.16 ===========================================================
    * Appended in 1.16. Require 1.16 in ru_plugin_info.api_version, or check RU_API_HAS().
    */
+  /* The server's paid Auto Tournament license key, for the license check-in: its length (the key
+   * in buf, truncated to len-1), or -1 without a key, with a key that doesn't verify, or with a
+   * free key (nothing to count). Any thread. */
+  int (*license_key)(ru_plugin* self, char* buf, uint32_t len);
+  /* ==== v1.17 ===========================================================
+   * Appended in 1.17. Require 1.17 in ru_plugin_info.api_version, or check RU_API_HAS().
+   */
   /* Respawns the dead player in `slot` (on T or CT) on their player pawn through
    * CBasePlayerController::SetPawn + CCSPlayerController::Respawn, from the core gamedata (vtable
    * slot checked). Bots too. 1 = respawned, 2 = already alive (nothing done), 0 = refused (bad
    * slot, not on T / CT, no pawn) or unavailable (engine_feature_available "respawn"). Game thread. */
   int (*player_respawn)(ru_plugin* self, int slot);
 
-  /* v1.16+: fields are appended here. Check RU_API_HAS() before use. */
+  /* v1.17+: fields are appended here. Check RU_API_HAS() before use. */
 } ru_api;
 
 /* ---- what a plugin exports --------------------------------------------- */

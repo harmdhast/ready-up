@@ -278,4 +278,7 @@ class Client {
   bool curlInit_ = false;
 };
 
+// One JSON POST with the default TLS settings, answer ignored (the license check-in).
+void PostJson(const std::string& url, const std::string& body);
+
 }  // namespace fleet

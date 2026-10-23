@@ -36,6 +36,7 @@
 // Commands: `ru fleet status|enroll [url] <code|key> [--insecure]|reconnect` (console / RCON; also plain
 // `fleet ...`), `.fleet status|reconnect` / `.ru fleet ...` (admins, chat).
 #include "readyup/fleet_iface.h"
+#include "readyup/license_checkin.h"
 #include "readyup/match_iface.h"
 #include "readyup/plugin_api.h"
 #include "readyup/plugin_needs_iface.h"
@@ -1543,6 +1544,8 @@ READYUP_PLUGIN_EXPORT int readyup_plugin_load(const ru_api* api, uint32_t core_a
       ApplyServerConfigLocal("saved");
     }
     BuildHello();
+    // Servers without the match plugin (practice, fun) check in from here (license_checkin.h).
+    readyup::license_checkin::Start(api, g_dataDir, FLEET_VERSION, &fleet::PostJson);
 
     api->register_console_command(api->self, "fleet", &OnConsole, nullptr);
     api->register_chat_command(api->self, ".fleet", &OnChat, nullptr);
@@ -1592,6 +1595,7 @@ READYUP_PLUGIN_EXPORT void readyup_plugin_unload(void) {
       g_configured = false;
       g_startError.clear();
     }
+    readyup::license_checkin::Stop();
     StopDemos();       // joins the streamer (it saves the streams)
     if (c) c->Stop();  // joins the network thread (closes the socket with 1000)
     c.reset();

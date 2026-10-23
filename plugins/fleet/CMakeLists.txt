@@ -80,7 +80,10 @@ if (NOT FLEET_CURL_OK)
 endif()
 message(STATUS "fleet.so: ${FLEET_CURL_WHAT}")
 
-readyup_add_plugin(fleet fleet_plugin.cpp fleet_client.cpp)
+# The license check-in (match/readyup/license_checkin.h) runs here too: practice and fun servers have no match.so.
+readyup_add_plugin(fleet fleet_plugin.cpp fleet_client.cpp ${CMAKE_SOURCE_DIR}/plugins/match/readyup/license_checkin.cpp
+  ${CMAKE_SOURCE_DIR}/libs/readyup/minijson.cpp)
+target_include_directories(readyup_plugin_fleet PRIVATE ${CMAKE_SOURCE_DIR}/plugins/match ${CMAKE_SOURCE_DIR}/libs)
 target_link_libraries(readyup_plugin_fleet PRIVATE readyup_fleet_core ${FLEET_CURL_LIBS})
 target_include_directories(readyup_plugin_fleet PRIVATE ${FLEET_CURL_INC})
 target_compile_definitions(readyup_plugin_fleet PRIVATE FLEET_VERSION="${READYUP_SEMVER}" ${FLEET_CURL_DEFS})

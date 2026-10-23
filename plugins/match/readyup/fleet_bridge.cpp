@@ -56,6 +56,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace readyup::fleet_bridge {
@@ -75,6 +76,24 @@ constexpr size_t kExecOutputMax = 8192;       // §7.4
 constexpr double kExecCaptureS = 0.5;
 
 const ru_api* g_api = nullptr;
+
+// ---- where players connect from -------------------------------------------------------------
+// The address each player's client connected from (the engine's player_connect "address", without
+// the port), by SteamID64: sent with event.player_connect so the platform can tell a player on
+// the machine's LAN from one over the internet (its connect address choice learns from it).
+std::unordered_map<uint64_t, std::string> g_connectAddress;
+
+void OnRawConnect(void*, const char*, const ru_game_event* ev) {
+  if (!g_api || !ev) return;
+  const uint64_t xuid = g_api->ev_get_uint64(g_api->self, ev, "xuid", 0);
+  const char* address = g_api->ev_get_string(g_api->self, ev, "address", "");
+  if (!xuid || !address || !*address) return;
+  std::string ip(address);
+  const size_t colon = ip.rfind(':');
+  // "1.2.3.4:27005" -> "1.2.3.4"; "loopback" and anything without a port stays as is.
+  if (colon != std::string::npos && ip.find(':') == colon) ip.resize(colon);
+  g_connectAddress[xuid] = ip;
+}
 
 // ---- fleet.so -------------------------------------------------------------------------------
 uint64_t g_fleetInstance = 0;
@@ -2317,6 +2336,9 @@ void Install(const ru_api* api) {
   AddMatchFlowListener(&OnFlow);
   demo::AddListener(&OnDemo);
   demo::SetStreamHooks(demo::StreamHooks{&StreamDemoBegin, &StreamDemoEnd});
+  if (!api->subscribe_game_event(api->self, "player_connect", &OnRawConnect, nullptr)) {
+    Print("fleet: could not subscribe to player_connect (no connect addresses)\n");
+  }
 }
 
 void Uninstall() {
@@ -2341,6 +2363,10 @@ void OnCoreEvent(const ru_event* e) {
     d["steamid64"] = sid;
     d["name"] = e->name ? e->name : "";
     d["team"] = TeamOfSid(e->steamid64);
+    if (e->type == RU_EVENT_PLAYER_CONNECT) {
+      const auto at = g_connectAddress.find(e->steamid64);
+      if (at != g_connectAddress.end()) d["address"] = at->second;
+    }
     if (e->type == RU_EVENT_PLAYER_DISCONNECT) d["reason"] = std::to_string(e->reason);
     signals::Emit(e->type == RU_EVENT_PLAYER_CONNECT ? "player_connect" : "player_disconnect", std::move(d));
   } else if (e->type == RU_EVENT_PLAYER_TEAM) {

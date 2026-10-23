@@ -95,6 +95,7 @@
     "item_purchase",
     "player_blind",
     "player_changename",
+    "player_connect",
     "player_death",
     "player_disconnect",
     "player_hurt",

@@ -139,6 +139,9 @@ struct Resolution {
   std::string detail;     // human-readable reason / anchor report
 };
 
+// Addresses of RIP-relative LEAs (REX.W 8D, mod=00 rm=101) in executable regions whose target is `target`.
+std::vector<uintptr_t> LeaSitesOf(const Image& img, uintptr_t target);
+
 bool CheckAnchor(const Image& img, uintptr_t fn, const Anchor& a, std::string* detail);
 Resolution Resolve(const Image& img, const FunctionSpec& spec);
 

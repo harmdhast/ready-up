@@ -72,9 +72,10 @@ std::string ExpandTokens(const std::string& format, const TokenValues& v) {
 
 std::string FormatDemoFileName(const std::string& format, const TokenValues& v) {
   std::string out = ExpandTokens(format, v);
+  // Only what the fleet stores (fleet_demo.h IsDemoFileName): a team called "Team!" would otherwise lose its demo.
   for (char& c : out) {
     const unsigned char u = static_cast<unsigned char>(c);
-    if (c == ' ' || c == '/' || c == '\\' || c == '"' || c == '\'' || c == ';' || u < 0x20) c = '_';
+    if (!std::isalnum(u) && c != '.' && c != '-') c = '_';
   }
   while (!out.empty() && out.front() == '.') out.erase(out.begin());
   if (out.empty()) out = "readyup_demo";
